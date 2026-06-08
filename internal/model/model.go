@@ -1,0 +1,64 @@
+package model
+
+// RecordType represents a DNS record type.
+type RecordType string
+
+const (
+	RecordTypeA     RecordType = "A"
+	RecordTypeAAAA  RecordType = "AAAA"
+	RecordTypeCNAME RecordType = "CNAME"
+	RecordTypeTXT   RecordType = "TXT"
+	RecordTypeMX    RecordType = "MX"
+	RecordTypeSRV   RecordType = "SRV"
+	RecordTypeNS    RecordType = "NS"
+	RecordTypeCAA   RecordType = "CAA"
+)
+
+// BaseRecord holds fields common to all DNS records and shared defaults.
+type BaseRecord struct {
+	TTL      int    `yaml:"ttl"`
+	Priority int    `yaml:"priority"` // used by MX, SRV
+	Comment  string `yaml:"comment"`
+}
+
+// Record is a fully resolved DNS record destined for a specific upstream instance.
+type Record struct {
+	BaseRecord `yaml:",inline"`
+
+	// ID is the record identifier from the label/yaml (e.g. "web", "api").
+	ID string
+
+	// SourceID is the originating source identifier (container ID, file path, etc.).
+	SourceID string
+
+	// Upstream is the named upstream instance this record targets.
+	Upstream string
+
+	Type  RecordType `yaml:"type"`
+	Name  string     `yaml:"name"`
+	Value string     `yaml:"value"`
+}
+
+// UpstreamConfig holds the configuration for a named upstream adapter instance.
+type UpstreamConfig struct {
+	Type string `yaml:"type"`
+
+	// Cloudflare
+	APIToken string `yaml:"api_token"`
+	ZoneID   string `yaml:"zone_id"`
+
+	// PiHole
+	URL      string `yaml:"url"`
+	Password string `yaml:"password"`
+}
+
+// SourceConfig holds the configuration for a named source adapter instance.
+type SourceConfig struct {
+	Type string `yaml:"type"`
+
+	// Docker
+	Host string `yaml:"host"` // e.g. unix:///var/run/docker.sock
+
+	// YAML
+	Glob string `yaml:"glob"` // e.g. /config/*.yaml
+}

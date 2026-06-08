@@ -1,0 +1,33 @@
+name: beacons
+
+services:
+  dummy:
+    image: traefik/whoami
+    container_name: dummy
+    labels:
+      dns.enable: "true"
+      dns.ttl: "300"
+      dns.web.pihole-home.type: "CNAME"
+      dns.web.pihole-home.name: "who.luna.lan"
+      dns.web.pihole-home.value: "luna.lan"
+
+  beacons:
+    container_name: beacons
+    build: .
+    restart: unless-stopped
+    environment:
+      - BEACONS_DRY_RUN=false
+    env_file:
+      - .env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./beacons.yaml:/beacons.yaml:ro
+      - ./config:/config:ro
+      - ./data:/data
+    command: ["-config", "/beacons.yaml"]
+    labels:
+      dns.enable: "true"
+      dns.ttl: "300"
+      dns.web.pihole-home.type: "A"
+      dns.web.pihole-home.name: "luna.lan"
+      dns.web.pihole-home.value: "192.168.0.235"

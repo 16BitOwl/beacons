@@ -1,0 +1,37 @@
+defaults:
+  ttl: 300
+
+store:
+  type: file   # "memory" (default) or "file"
+  path: /data/beacons-state.json  # only used when type is "file"
+
+sync:
+  poll_interval: 300   # seconds, 0 to disable polling
+  use_events: true    # also watch Docker events in real-time
+  dry_run: false      # set to true (or BEACONS_DRY_RUN=true) to log instead of apply
+  strict_env: false   # set to true (or BEACONS_STRICT_ENV=true) to fail on missing env vars
+
+sources:
+  docker-local:
+    type: docker
+    host: unix:///var/run/docker.sock
+
+  static-records:
+    type: yaml
+    glob: /config/*.yaml
+
+upstreams:
+  cf-zone-a:
+    type: cloudflare
+    api_token: ${CF_API_TOKEN}
+    zone_id: ${CF_ZONE_A_ID}
+
+  cf-zone-b:
+    type: cloudflare
+    api_token: ${CF_API_TOKEN}
+    zone_id: ${CF_ZONE_B_ID}
+
+  pihole-home:
+    type: pihole
+    url: ${PIHOLE_URL}
+    password: ${PIHOLE_PASSWORD}

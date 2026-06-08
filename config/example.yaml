@@ -1,0 +1,4 @@
+# Optional file-level defaults (override global defaults, overridden by per-record values).
+defaults:
+  ttl: 600
+
