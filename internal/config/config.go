@@ -44,6 +44,11 @@ type SyncConfig struct {
 	// Can also be enabled via the BEACONS_USE_EVENTS=bool environment variable
 	UseEvents bool `yaml:"use_events"`
 
+	// DebounceDelay collapses rapid container events (kill/stop/die/start) into
+	// a single action after this many milliseconds of quiet. 0 disables debouncing.
+	// Can also be set via BEACONS_DEBOUNCE_MS=int environment variable
+	DebounceDelay int `yaml:"debounce_ms"`
+
 	// DryRun logs upstream operations instead of applying them
 	// Can also be enabled via the BEACONS_DRY_RUN=bool environment variable
 	DryRun bool `yaml:"dry_run"`

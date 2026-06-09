@@ -30,9 +30,10 @@ func New(name string, glob string, defaults model.BaseRecord, strict bool) *Sour
 func (s *Source) Name() string { return s.name }
 
 func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
-	slog.Info("yaml source starting", "source", s.name, "glob", s.glob)
+	slog.Info("yaml source starting",
+		"source", s.name,
+		"glob", s.glob)
 
-	// Initial load.
 	s.loadAll(ch)
 
 	watcher, err := fsnotify.NewWatcher()

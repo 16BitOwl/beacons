@@ -6,7 +6,8 @@ store:
   path: /data/beacons-state.json  # only used when type is "file"
 
 sync:
-  poll_interval: 300   # seconds, 0 to disable polling
+  poll_interval: 600  # seconds, 0 to disable polling
+  debounce_ms: 500    # 500ms quiet window per container; 0 disables
   use_events: true    # also watch Docker events in real-time
   dry_run: false      # set to true (or BEACONS_DRY_RUN=true) to log instead of apply
   strict_env: false   # set to true (or BEACONS_STRICT_ENV=true) to fail on missing env vars

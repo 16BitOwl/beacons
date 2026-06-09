@@ -19,15 +19,16 @@ const labelPrefix = "dns."
 
 // Source is the Docker source adapter.
 type Source struct {
-	name         string
-	client       *dockerclient.Client
-	defaults     model.BaseRecord
-	pollInterval time.Duration
-	useEvents    bool
+	name          string
+	client        *dockerclient.Client
+	defaults      model.BaseRecord
+	pollInterval  time.Duration
+	useEvents     bool
+	debounceDelay time.Duration
 }
 
 // New creates a new Docker source adapter.
-func New(name string, host string, defaults model.BaseRecord, pollInterval time.Duration, useEvents bool) (*Source, error) {
+func New(name string, host string, defaults model.BaseRecord, pollInterval time.Duration, useEvents bool, debounceDelay time.Duration) (*Source, error) {
 	opts := []dockerclient.Opt{dockerclient.WithAPIVersionNegotiation()}
 	if host != "" {
 		opts = append(opts, dockerclient.WithHost(host))
@@ -37,11 +38,12 @@ func New(name string, host string, defaults model.BaseRecord, pollInterval time.
 		return nil, err
 	}
 	return &Source{
-		name:         name,
-		client:       c,
-		defaults:     defaults,
-		pollInterval: pollInterval,
-		useEvents:    useEvents,
+		name:          name,
+		client:        c,
+		defaults:      defaults,
+		pollInterval:  pollInterval,
+		useEvents:     useEvents,
+		debounceDelay: debounceDelay,
 	}, nil
 }
 
@@ -76,6 +78,14 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 		eventC, errC = s.client.Events(ctx, dockerevents.ListOptions{Filters: f})
 	}
 
+	// debounce state: per-container pending timer and last event
+	type pending struct {
+		timer *time.Timer
+		msg   dockerevents.Message
+	}
+	debounced := map[string]*pending{}
+	debouncedC := make(chan dockerevents.Message, 64)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -87,6 +97,29 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 					"err", err)
 			}
 		case msg := <-eventC:
+			if s.debounceDelay <= 0 || msg.Action == "start" {
+				// Cancel any pending stop-debounce for this container on start.
+				if msg.Action == "start" {
+					if p, ok := debounced[msg.Actor.ID]; ok {
+						p.timer.Stop()
+						delete(debounced, msg.Actor.ID)
+					}
+				}
+				s.handleEvent(ctx, msg, ch)
+				continue
+			}
+			id := msg.Actor.ID
+			if p, ok := debounced[id]; ok {
+				p.timer.Stop()
+				p.msg = msg
+				p.timer = time.AfterFunc(s.debounceDelay, func() { debouncedC <- p.msg })
+			} else {
+				p := &pending{msg: msg}
+				p.timer = time.AfterFunc(s.debounceDelay, func() { debouncedC <- p.msg })
+				debounced[id] = p
+			}
+		case msg := <-debouncedC:
+			delete(debounced, msg.Actor.ID)
 			s.handleEvent(ctx, msg, ch)
 		case <-pollC:
 			if err := s.poll(ctx, ch); err != nil {

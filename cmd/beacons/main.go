@@ -49,6 +49,12 @@ func main() {
 	}
 	pollInterval := time.Duration(pollSeconds) * time.Second
 
+	debounceMS := cfg.Sync.DebounceDelay
+	if v, err := strconv.Atoi(os.Getenv("BEACONS_DEBOUNCE_MS")); err == nil && v >= 0 {
+		debounceMS = v
+	}
+	debounceDelay := time.Duration(debounceMS) * time.Millisecond
+
 	// Build upstreams
 	upstreams := make(map[string]upstream.Upstream, len(cfg.Upstreams))
 	for name, ucfg := range cfg.Upstreams {
@@ -68,7 +74,7 @@ func main() {
 	// Build sources
 	var sources []source.Source
 	for name, scfg := range cfg.Sources {
-		s, err := buildSource(name, scfg, cfg.Defaults, pollInterval, useEvents, strict)
+		s, err := buildSource(name, scfg, cfg.Defaults, pollInterval, useEvents, debounceDelay, strict)
 		if err != nil {
 			slog.Error("failed to build source", "name", name, "err", err)
 			os.Exit(1)
@@ -94,6 +100,7 @@ func main() {
 		"strict_env", strict,
 		"poll_interval", pollInterval,
 		"use_events", useEvents,
+		"debounce_delay", debounceDelay,
 	)
 	if err := syncer.Run(ctx, sources); err != nil {
 		slog.Error("syncer exited with error", "err", err)
@@ -128,10 +135,10 @@ func buildUpstream(name string, cfg model.UpstreamConfig) (upstream.Upstream, er
 	}
 }
 
-func buildSource(name string, cfg model.SourceConfig, defaults model.BaseRecord, pollInterval time.Duration, useEvents bool, strict bool) (source.Source, error) {
+func buildSource(name string, cfg model.SourceConfig, defaults model.BaseRecord, pollInterval time.Duration, useEvents bool, debounceDelay time.Duration, strict bool) (source.Source, error) {
 	switch cfg.Type {
 	case "docker":
-		return sourcedocker.New(name, cfg.Host, defaults, pollInterval, useEvents)
+		return sourcedocker.New(name, cfg.Host, defaults, pollInterval, useEvents, debounceDelay)
 	case "yaml":
 		return sourceyaml.New(name, cfg.Glob, defaults, strict), nil
 	default:
