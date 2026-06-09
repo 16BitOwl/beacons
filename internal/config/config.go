@@ -5,11 +5,14 @@ import (
 
 	"github.com/16bitowl/beacons/internal/envutil"
 	"github.com/16bitowl/beacons/internal/model"
-	"gopkg.in/yaml.v3"
+	"github.com/goccy/go-yaml"
 )
 
 // Config is the top-level beacons configuration
 type Config struct {
+	// LogLevel sets the log verbosity: debug, info, warn, error (default: info)
+	LogLevel string `yaml:"log_level"`
+
 	// Defaults applied to all records unless overridden
 	Defaults model.BaseRecord `yaml:"defaults"`
 
@@ -37,55 +40,51 @@ type StoreConfig struct {
 
 type SyncConfig struct {
 	// PollInterval is the Docker polling interval in seconds (0 = disabled)
-	// Can also be set via the BEACONS_POLL_INTERVAL=int environment variable
 	PollInterval int `yaml:"poll_interval"`
 
 	// UseEvents enables real-time Docker event watching alongside polling
-	// Can also be enabled via the BEACONS_USE_EVENTS=bool environment variable
 	UseEvents bool `yaml:"use_events"`
 
 	// DebounceDelay collapses rapid container events (kill/stop/die/start) into
 	// a single action after this many milliseconds of quiet. 0 disables debouncing.
-	// Can also be set via BEACONS_DEBOUNCE_MS=int environment variable
 	DebounceDelay int `yaml:"debounce_ms"`
 
 	// DryRun logs upstream operations instead of applying them
-	// Can also be enabled via the BEACONS_DRY_RUN=bool environment variable
 	DryRun bool `yaml:"dry_run"`
 
 	// StrictEnv causes startup to fail if any ${VAR} references are unset
-	// Can also be enabled via the BEACONS_STRICT_ENV=bool environment variable
 	StrictEnv bool `yaml:"strict_env"`
 }
 
-// Load reads and parses the config file at the given path.
-// It performs a lenient first pass to read strict_env, then re-expands strictly if enabled.
+// Load reads and parses the config file at the given path, then overlays any
+// BEACONS_* environment variables. The config file is optional — if path is
+// empty or the file does not exist, config is sourced entirely from env vars.
 func Load(path string) (*Config, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	// First pass: lenient expansion to read the strict_env setting.
 	var cfg Config
-	if err := yaml.Unmarshal([]byte(envutil.ExpandLenient(string(raw))), &cfg); err != nil {
-		return nil, err
+
+	if path != "" {
+		raw, err := os.ReadFile(path)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		if err == nil {
+			// First pass: lenient expansion to read the strict_env setting.
+			if err := yaml.Unmarshal([]byte(envutil.ExpandLenient(string(raw))), &cfg); err != nil {
+				return nil, err
+			}
+			// Second pass: strict expansion if required.
+			if cfg.Sync.StrictEnv {
+				expanded, err := envutil.Expand(string(raw))
+				if err != nil {
+					return nil, err
+				}
+				if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 
-	// Env var takes precedence over config file.
-	strict := cfg.Sync.StrictEnv || os.Getenv("BEACONS_STRICT_ENV") == "true"
-	if !strict {
-		return &cfg, nil
-	}
-
-	// Second pass: strict expansion now that we know it's required.
-	expanded, err := envutil.Expand(string(raw))
-	if err != nil {
-		return nil, err
-	}
-	var strictCfg Config
-	if err := yaml.Unmarshal([]byte(expanded), &strictCfg); err != nil {
-		return nil, err
-	}
-	return &strictCfg, nil
+	overlayEnv(&cfg)
+	return &cfg, nil
 }

@@ -16,7 +16,8 @@ services:
     build: .
     restart: unless-stopped
     environment:
-      - BEACONS_DRY_RUN=false
+      - BEACONS_SYNC_DRY_RUN=false
+      - BEACONS_LOG_LEVEL=DEBUG
     env_file:
       - .env
     volumes:

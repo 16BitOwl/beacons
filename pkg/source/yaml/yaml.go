@@ -12,7 +12,7 @@ import (
 	"github.com/16bitowl/beacons/internal/model"
 	"github.com/16bitowl/beacons/pkg/source"
 	"github.com/fsnotify/fsnotify"
-	"gopkg.in/yaml.v3"
+	"github.com/goccy/go-yaml"
 )
 
 // Source is the YAML file source adapter.

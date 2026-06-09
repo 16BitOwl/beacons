@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,34 +26,22 @@ func main() {
 	cfgPath := flag.String("config", "beacons.yaml", "path to config file")
 	flag.Parse()
 
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: logLevel(os.Getenv("BEACONS_LOG_LEVEL")),
+	})))
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		slog.Error("failed to load config",
-			"err", err)
+		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
 	}
 
-	// Env var takes precedence over config file.
-	dryRun := cfg.Sync.DryRun || os.Getenv("BEACONS_DRY_RUN") == "true"
-	if dryRun {
+	if cfg.Sync.DryRun {
 		slog.Info("[dry-run] mode enabled: upstream changes will be logged only")
 	}
 
-	strict := cfg.Sync.StrictEnv || os.Getenv("BEACONS_STRICT_ENV") == "true"
-	useEvents := cfg.Sync.UseEvents || os.Getenv("BEACONS_USE_EVENTS") == "true"
-	pollSeconds := cfg.Sync.PollInterval
-	if v, err := strconv.Atoi(os.Getenv("BEACONS_POLL_INTERVAL")); err == nil && v > -1 {
-		pollSeconds = v
-	}
-	pollInterval := time.Duration(pollSeconds) * time.Second
-
-	debounceMS := cfg.Sync.DebounceDelay
-	if v, err := strconv.Atoi(os.Getenv("BEACONS_DEBOUNCE_MS")); err == nil && v >= 0 {
-		debounceMS = v
-	}
-	debounceDelay := time.Duration(debounceMS) * time.Millisecond
+	pollInterval := time.Duration(cfg.Sync.PollInterval) * time.Second
+	debounceDelay := time.Duration(cfg.Sync.DebounceDelay) * time.Millisecond
 
 	// Build upstreams
 	upstreams := make(map[string]upstream.Upstream, len(cfg.Upstreams))
@@ -65,7 +53,7 @@ func main() {
 				"err", err)
 			os.Exit(1)
 		}
-		if dryRun {
+		if cfg.Sync.DryRun {
 			u = upstream.NewDryRun(u)
 		}
 		upstreams[name] = u
@@ -74,7 +62,7 @@ func main() {
 	// Build sources
 	var sources []source.Source
 	for name, scfg := range cfg.Sources {
-		s, err := buildSource(name, scfg, cfg.Defaults, pollInterval, useEvents, debounceDelay, strict)
+		s, err := buildSource(name, scfg, cfg.Defaults, pollInterval, cfg.Sync.UseEvents, debounceDelay, cfg.Sync.StrictEnv)
 		if err != nil {
 			slog.Error("failed to build source", "name", name, "err", err)
 			os.Exit(1)
@@ -96,15 +84,28 @@ func main() {
 		"sources", len(sources),
 		"upstreams", len(upstreams),
 		"store", cfg.Store.Type,
-		"dry_run", dryRun,
-		"strict_env", strict,
+		"dry_run", cfg.Sync.DryRun,
+		"strict_env", cfg.Sync.StrictEnv,
 		"poll_interval", pollInterval,
-		"use_events", useEvents,
+		"use_events", cfg.Sync.UseEvents,
 		"debounce_delay", debounceDelay,
 	)
 	if err := syncer.Run(ctx, sources); err != nil {
 		slog.Error("syncer exited with error", "err", err)
 		os.Exit(1)
+	}
+}
+
+func logLevel(l string) slog.Level {
+	switch strings.ToLower(l) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
 }
 
