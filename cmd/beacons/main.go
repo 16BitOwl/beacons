@@ -75,7 +75,8 @@ func main() {
 		slog.Error("failed to initialise store", "err", err)
 		os.Exit(1)
 	}
-	syncer := internalsync.New(store, upstreams)
+	retryInterval := time.Duration(cfg.Sync.RetryInterval) * time.Second
+	syncer := internalsync.New(store, upstreams, retryInterval)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -89,6 +90,7 @@ func main() {
 		"poll_interval", pollInterval,
 		"use_events", cfg.Sync.UseEvents,
 		"debounce_delay", debounceDelay,
+		"retry_interval", retryInterval,
 	)
 	if err := syncer.Run(ctx, sources); err != nil {
 		slog.Error("syncer exited with error", "err", err)

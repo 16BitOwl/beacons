@@ -55,7 +55,8 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 		"poll_interval", s.pollInterval,
 		"use_events", s.useEvents)
 
-	// Initial full sync.
+	// Initial full sync — emits EventSync so the syncer can remove any records
+	// from containers that were removed while Beacons was offline.
 	if err := s.poll(ctx, ch); err != nil {
 		slog.Error("docker initial poll failed",
 			"source", s.name,
@@ -131,28 +132,39 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 	}
 }
 
+// poll scans all running containers and emits a single EventSync containing
+// every DNS record found. The syncer uses this to detect and clean up records
+// from containers that are no longer running.
 func (s *Source) poll(ctx context.Context, ch chan<- source.Event) error {
 	containers, err := s.client.ContainerList(ctx, container.ListOptions{})
 	if err != nil {
 		return err
 	}
-	found := 0
+
+	var records []model.Record
 	for _, c := range containers {
-		records := parseLabels(c.ID, c.Labels, s.defaults)
-		if len(records) == 0 {
+		recs := parseLabels(s.name, c.ID, c.Labels, s.defaults)
+		if len(recs) == 0 {
 			continue
 		}
 		slog.Debug("discovered container with dns labels",
 			"source", s.name,
 			"container", c.ID[:12],
-			"records", len(records))
-		ch <- source.Event{Type: source.EventUpsert, SourceID: c.ID, Records: records}
-		found++
+			"records", len(recs))
+		records = append(records, recs...)
 	}
+
 	slog.Info("docker poll complete",
 		"source", s.name,
-		"containers_with_records", found,
-		"total_containers", len(containers))
+		"containers_with_records", uniqueSourceIDs(records),
+		"total_containers", len(containers),
+		"total_records", len(records))
+
+	ch <- source.Event{
+		Type:       source.EventSync,
+		SourceName: s.name,
+		Records:    records,
+	}
 	return nil
 }
 
@@ -169,13 +181,18 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 				"err", err)
 			return
 		}
-		records := parseLabels(info.ID, info.Config.Labels, s.defaults)
+		records := parseLabels(s.name, info.ID, info.Config.Labels, s.defaults)
 		if len(records) > 0 {
 			slog.Info("container has dns records, queuing upsert",
 				"source", s.name,
 				"container", msg.Actor.ID[:12],
 				"records", len(records))
-			ch <- source.Event{Type: source.EventUpsert, SourceID: info.ID, Records: records}
+			ch <- source.Event{
+				Type:       source.EventUpsert,
+				SourceName: s.name,
+				SourceID:   info.ID,
+				Records:    records,
+			}
 		} else {
 			slog.Debug("container has no dns labels, skipping",
 				"source", s.name,
@@ -186,7 +203,11 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 			"source", s.name,
 			"container", msg.Actor.ID[:12],
 			"action", msg.Action)
-		ch <- source.Event{Type: source.EventDelete, SourceID: msg.Actor.ID}
+		ch <- source.Event{
+			Type:       source.EventDelete,
+			SourceName: s.name,
+			SourceID:   msg.Actor.ID,
+		}
 	}
 }
 
@@ -198,7 +219,7 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 //	dns.<record-id>.<upstream>.type=...
 //	dns.<record-id>.<upstream>.value=...
 //	dns.<record-id>.<upstream>.ttl=...   (overrides base)
-func parseLabels(containerID string, labels map[string]string, defaults model.BaseRecord) []model.Record {
+func parseLabels(sourceName, containerID string, labels map[string]string, defaults model.BaseRecord) []model.Record {
 	if labels[labelPrefix+"enable"] != "true" {
 		return nil
 	}
@@ -241,6 +262,7 @@ func parseLabels(containerID string, labels map[string]string, defaults model.Ba
 				BaseRecord: base,
 				ID:         recordID,
 				SourceID:   containerID,
+				SourceName: sourceName,
 				Upstream:   upstreamName,
 				Type:       model.RecordType(strings.ToUpper(fields["type"])),
 				Name:       fields["name"],
@@ -263,4 +285,13 @@ func parseLabels(containerID string, labels map[string]string, defaults model.Ba
 		}
 	}
 	return records
+}
+
+// uniqueSourceIDs counts distinct SourceIDs in a record slice.
+func uniqueSourceIDs(records []model.Record) int {
+	seen := make(map[string]struct{}, len(records))
+	for _, r := range records {
+		seen[r.SourceID] = struct{}{}
+	}
+	return len(seen)
 }

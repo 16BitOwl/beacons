@@ -54,6 +54,10 @@ type SyncConfig struct {
 
 	// StrictEnv causes startup to fail if any ${VAR} references are unset
 	StrictEnv bool `yaml:"strict_env"`
+
+	// RetryInterval is how often (in seconds) the syncer re-attempts records
+	// that previously failed to push to their upstream. 0 disables retries.
+	RetryInterval int `yaml:"retry_interval"`
 }
 
 // Load reads and parses the config file at the given path, then overlays any

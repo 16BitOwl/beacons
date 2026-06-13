@@ -74,19 +74,35 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 	}
 }
 
+// loadAll reads all files matching the glob and emits a single EventSync
+// containing every record found. If a previously loaded file has been deleted
+// or no longer matches, its records will be absent from the snapshot and the
+// syncer will clean them up.
 func (s *Source) loadAll(ch chan<- source.Event) {
 	files, err := filepath.Glob(s.glob)
-	if err != nil || len(files) == 0 {
+	if err != nil {
+		slog.Error("yaml glob failed",
+			"source", s.name,
+			"glob", s.glob,
+			"err", err)
+	}
+
+	if len(files) == 0 {
 		slog.Warn("yaml source found no files matching glob",
 			"source", s.name,
 			"glob", s.glob)
+		// Emit an empty sync so the syncer removes any previously stored records.
+		ch <- source.Event{Type: source.EventSync, SourceName: s.name}
 		return
 	}
+
 	slog.Debug("yaml source loading files",
 		"source", s.name,
 		"count", len(files))
+
+	var allRecords []model.Record
 	for _, f := range files {
-		records, err := parseFile(f, s.defaults, s.strict)
+		records, err := parseFile(s.name, f, s.defaults, s.strict)
 		if err != nil {
 			slog.Error("yaml parse failed",
 				"file", f,
@@ -98,8 +114,14 @@ func (s *Source) loadAll(ch chan<- source.Event) {
 				"source", s.name,
 				"file", f,
 				"records", len(records))
-			ch <- source.Event{Type: source.EventUpsert, SourceID: f, Records: records}
+			allRecords = append(allRecords, records...)
 		}
+	}
+
+	ch <- source.Event{
+		Type:       source.EventSync,
+		SourceName: s.name,
+		Records:    allRecords,
 	}
 }
 
@@ -135,7 +157,7 @@ type fileSchema struct {
 	Records  map[string]fileRecord `yaml:"records"`
 }
 
-func parseFile(path string, globalDefaults model.BaseRecord, strict bool) ([]model.Record, error) {
+func parseFile(sourceName, path string, globalDefaults model.BaseRecord, strict bool) ([]model.Record, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -178,6 +200,7 @@ func parseFile(path string, globalDefaults model.BaseRecord, strict bool) ([]mod
 				BaseRecord: recordBase,
 				ID:         recordID,
 				SourceID:   path,
+				SourceName: sourceName,
 				Upstream:   upstreamName,
 				Type:       model.RecordType(strings.ToUpper(fields.Type)),
 				Name:       fields.Name,

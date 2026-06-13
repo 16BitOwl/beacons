@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 // RecordType represents a DNS record type.
 type RecordType string
 
@@ -12,6 +14,15 @@ const (
 	RecordTypeSRV   RecordType = "SRV"
 	RecordTypeNS    RecordType = "NS"
 	RecordTypeCAA   RecordType = "CAA"
+)
+
+// RecordStatus represents the sync status of a record against its upstream.
+type RecordStatus string
+
+const (
+	RecordStatusPending RecordStatus = "pending"
+	RecordStatusSynced  RecordStatus = "synced"
+	RecordStatusFailed  RecordStatus = "failed"
 )
 
 // BaseRecord holds fields common to all DNS records and shared defaults.
@@ -28,8 +39,11 @@ type Record struct {
 	// ID is the record identifier from the label/yaml (e.g. "web", "api").
 	ID string
 
-	// SourceID is the originating source identifier (container ID, file path, etc.).
+	// SourceID is the originating source item identifier (container ID, file path, etc.).
 	SourceID string
+
+	// SourceName is the name of the source adapter instance that produced this record.
+	SourceName string
 
 	// Upstream is the named upstream instance this record targets.
 	Upstream string
@@ -37,6 +51,11 @@ type Record struct {
 	Type  RecordType `yaml:"type"`
 	Name  string     `yaml:"name"`
 	Value string     `yaml:"value"`
+
+	// Sync status — set by the Syncer after each upstream operation.
+	Status    RecordStatus `json:"status,omitempty"`
+	SyncedAt  time.Time    `json:"synced_at,omitempty"`
+	SyncError string       `json:"sync_error,omitempty"`
 }
 
 // UpstreamConfig holds the configuration for a named upstream adapter instance.
