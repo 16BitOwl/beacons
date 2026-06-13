@@ -1,0 +1,66 @@
+# Any config field can be overridden via environment variables without modifying
+# this file. Variables follow the pattern BEACONS_<YAML_PATH>, where path
+# segments are joined with single underscores:
+#
+#   BEACONS_SYNC_DRY_RUN=true
+#   BEACONS_DEFAULTS_TTL=60
+#   BEACONS_HTTP_ADDR=:9091
+#
+# Map keys (upstreams, sources) use double-underscore delimiters around the key:
+#
+#   BEACONS_UPSTREAMS__CF_ZONE_A__API_TOKEN=abc123
+#   BEACONS_SOURCES__DOCKER_LOCAL__HOST=tcp://10.0.0.1:2375
+#
+# Values inside the config file can also reference environment variables using
+# ${VAR} syntax. Set strict_env: true to fail on startup if any are unset.
+
+defaults:
+  ttl: 300
+
+http:
+  addr: ":9090"  # expose /healthz and /metrics; omit or leave empty to disable
+
+store:
+  type: file   # "memory" (default) or "file"
+  path: /data/beacons-state.json  # only used when type is "file"
+
+sync:
+  poll_interval: 600  # Docker poll interval in seconds; 0 or omit to disable
+  retry_interval: 300 # retry failed records in seconds; 0 or omit to disable
+  debounce_ms: 500    # collapse rapid container events after x ms of quiet; 0 to disable
+  use_events: true    # also watch Docker events in real-time
+  dry_run: false      # set to true (or BEACONS_DRY_RUN=true) to log instead of apply
+  strict_env: false   # set to true (or BEACONS_STRICT_ENV=true) to fail on missing env vars
+
+# Sources define where DNS records come from. Each entry is a named instance —
+# the name is arbitrary but must be unique. You can define multiple sources of
+# the same type (e.g. two Docker hosts or multiple YAML globs).
+sources:
+  docker-local:
+    type: docker
+    host: unix:///var/run/docker.sock
+
+  static-records:
+    type: yaml
+    glob: /config/*.yaml
+
+# Upstreams define where DNS records are pushed to. Each entry is a named
+# instance — the name is arbitrary but must be unique, and is referenced from
+# container labels and static YAML records to control which upstream a record
+# targets. You can define multiple instances of the same type (e.g. two
+# Cloudflare zones, or a Cloudflare zone alongside a Pi-hole).
+upstreams:
+  cf-zone-a:
+    type: cloudflare
+    api_token: ${CF_API_TOKEN}
+    zone_id: ${CF_ZONE_A_ID}
+
+  cf-zone-b:
+    type: cloudflare
+    api_token: ${CF_API_TOKEN}
+    zone_id: ${CF_ZONE_B_ID}
+
+  pihole-home:
+    type: pihole
+    url: ${PIHOLE_URL}
+    password: ${PIHOLE_PASSWORD}

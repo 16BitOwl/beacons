@@ -33,3 +33,6 @@ go.work.sum
 
 # Docker or runtime related
 data/
+
+# Local config (use beacons.example.yaml as a starting point)
+beacons.yaml
