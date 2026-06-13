@@ -1,6 +1,9 @@
 defaults:
   ttl: 300
 
+http:
+  addr: ":9090"  # expose http endpoints; omit or leave empty to disable
+
 store:
   type: file   # "memory" (default) or "file"
   path: /data/beacons-state.json  # only used when type is "file"

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/16bitowl/beacons/internal/metrics"
 	"github.com/16bitowl/beacons/internal/model"
 	"github.com/16bitowl/beacons/internal/registry"
 	"github.com/16bitowl/beacons/pkg/source"
@@ -16,12 +17,14 @@ type Syncer struct {
 	store         registry.Store
 	upstreams     map[string]upstream.Upstream
 	retryInterval time.Duration
+	metrics       *metrics.Metrics
 }
 
 // New creates a Syncer. retryInterval controls how often failed records are
-// re-attempted; pass 0 to disable automatic retries.
-func New(store registry.Store, upstreams map[string]upstream.Upstream, retryInterval time.Duration) *Syncer {
-	return &Syncer{store: store, upstreams: upstreams, retryInterval: retryInterval}
+// re-attempted; pass 0 to disable automatic retries. m may be nil to disable
+// metrics recording.
+func New(store registry.Store, upstreams map[string]upstream.Upstream, retryInterval time.Duration, m *metrics.Metrics) *Syncer {
+	return &Syncer{store: store, upstreams: upstreams, retryInterval: retryInterval, metrics: m}
 }
 
 // Run starts all sources and processes their events until ctx is cancelled.
@@ -190,7 +193,16 @@ func (s *Syncer) handleDelete(ctx context.Context, ev source.Event) {
 			"record", r.ID,
 			"type", r.Type,
 			"name", r.Name)
-		if err := u.Delete(ctx, r); err != nil {
+		start := time.Now()
+		err := u.Delete(ctx, r)
+		if s.metrics != nil {
+			result := "success"
+			if err != nil {
+				result = "failure"
+			}
+			s.metrics.RecordSync(r.Upstream, "delete", result, time.Since(start))
+		}
+		if err != nil {
 			slog.Error("upstream delete failed",
 				"upstream", r.Upstream,
 				"record", r.ID,
@@ -229,7 +241,16 @@ func (s *Syncer) upsertRecord(ctx context.Context, r model.Record) {
 		"name", r.Name,
 		"value", r.Value)
 
-	if err := u.Upsert(ctx, r); err != nil {
+	start := time.Now()
+	err := u.Upsert(ctx, r)
+	if s.metrics != nil {
+		result := "success"
+		if err != nil {
+			result = "failure"
+		}
+		s.metrics.RecordSync(r.Upstream, "upsert", result, time.Since(start))
+	}
+	if err != nil {
 		slog.Error("upstream upsert failed",
 			"upstream", r.Upstream,
 			"record", r.ID,

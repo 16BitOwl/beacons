@@ -27,6 +27,17 @@ type Config struct {
 
 	// Store controls record persistence
 	Store StoreConfig `yaml:"store"`
+
+	// HTTP configures the built-in HTTP server (healthz + metrics).
+	// Leave Addr empty to disable the server entirely.
+	HTTP HTTPConfig `yaml:"http"`
+}
+
+// HTTPConfig controls the built-in HTTP server.
+type HTTPConfig struct {
+	// Addr is the TCP address to listen on, e.g. ":9090".
+	// An empty string disables the server.
+	Addr string `yaml:"addr"`
 }
 
 // StoreConfig controls how records are persisted between restarts.

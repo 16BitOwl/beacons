@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -11,8 +12,10 @@ import (
 	"time"
 
 	"github.com/16bitowl/beacons/internal/config"
+	"github.com/16bitowl/beacons/internal/metrics"
 	"github.com/16bitowl/beacons/internal/model"
 	"github.com/16bitowl/beacons/internal/registry"
+	"github.com/16bitowl/beacons/internal/server"
 	internalsync "github.com/16bitowl/beacons/internal/sync"
 	"github.com/16bitowl/beacons/pkg/source"
 	sourcedocker "github.com/16bitowl/beacons/pkg/source/docker"
@@ -20,15 +23,32 @@ import (
 	"github.com/16bitowl/beacons/pkg/upstream"
 	upstreamcloudflare "github.com/16bitowl/beacons/pkg/upstream/cloudflare"
 	upstreampihole "github.com/16bitowl/beacons/pkg/upstream/pihole"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func main() {
 	cfgPath := flag.String("config", "beacons.yaml", "path to config file")
+	healthcheck := flag.Bool("healthcheck", false, "hit /healthz and exit 0/1 (for use as Docker HEALTHCHECK)")
+	healthAddr := flag.String("healthcheck-addr", "http://localhost:9090", "base URL for -healthcheck")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: logLevel(os.Getenv("BEACONS_LOG_LEVEL")),
 	})))
+
+	if *healthcheck {
+		resp, err := http.Get(*healthAddr + "/healthz") //nolint:noctx
+		if err != nil {
+			slog.Error("healthcheck failed", "err", err)
+			os.Exit(1)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			slog.Error("healthcheck failed", "status", resp.StatusCode)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -75,8 +95,14 @@ func main() {
 		slog.Error("failed to initialise store", "err", err)
 		os.Exit(1)
 	}
+
+	// Set up Prometheus registry and metrics.
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	m := metrics.New(reg)
+
 	retryInterval := time.Duration(cfg.Sync.RetryInterval) * time.Second
-	syncer := internalsync.New(store, upstreams, retryInterval)
+	syncer := internalsync.New(store, upstreams, retryInterval, m)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -91,7 +117,19 @@ func main() {
 		"use_events", cfg.Sync.UseEvents,
 		"debounce_delay", debounceDelay,
 		"retry_interval", retryInterval,
+		"http_addr", cfg.HTTP.Addr,
 	)
+
+	// Start the HTTP server if configured.
+	if cfg.HTTP.Addr != "" {
+		srv := server.New(cfg.HTTP.Addr, store, reg)
+		go func() {
+			if err := srv.Run(ctx); err != nil {
+				slog.Error("http server error", "err", err)
+			}
+		}()
+	}
+
 	if err := syncer.Run(ctx, sources); err != nil {
 		slog.Error("syncer exited with error", "err", err)
 		os.Exit(1)
