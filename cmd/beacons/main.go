@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -177,10 +178,7 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 	case "pihole":
 		return upstreampihole.New(name, cfg.URL, cfg.Password), nil
 	default:
-		slog.Warn("unknown upstream type",
-			"name", name,
-			"type", cfg.Type)
-		return nil, nil
+		return nil, fmt.Errorf("unknown upstream type %q for %q", cfg.Type, name)
 	}
 }
 
@@ -191,9 +189,6 @@ func buildSource(name string, cfg model.SourceConfig, defaults model.BaseRecord,
 	case "yaml":
 		return sourceyaml.New(name, cfg.Glob, defaults, strict), nil
 	default:
-		slog.Warn("unknown source type",
-			"name", name,
-			"type", cfg.Type)
-		return nil, nil
+		return nil, fmt.Errorf("unknown source type %q for %q", cfg.Type, name)
 	}
 }
