@@ -137,7 +137,20 @@ func (u *Upstream) patchCNAME(ctx context.Context, r model.Record, remove bool) 
 		entry = fmt.Sprintf("%s,%d", entry, r.TTL)
 	}
 	updated := toggleEntry(current, entry, remove)
+	if len(updated) == len(current) && !remove {
+		slog.Debug("pihole cname entry already present, skipping",
+			"upstream", u.name,
+			"entry", entry)
+		return nil
+	}
 
+	action := "adding"
+	if remove {
+		action = "removing"
+	}
+	slog.Debug("pihole "+action+" cname entry",
+		"upstream", u.name,
+		"entry", entry)
 	return u.patch(ctx, map[string]any{
 		"config": map[string]any{
 			"dns": map[string]any{"cnameRecords": updated},

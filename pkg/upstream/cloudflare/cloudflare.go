@@ -139,9 +139,12 @@ func (u *Upstream) Delete(ctx context.Context, r model.Record) error {
 	fqdn := u.fqdn(r.Name)
 	rc := cloudflare.ZoneIdentifier(u.zoneID)
 
+	// Filter by content (value) so we only delete the record Beacons owns,
+	// leaving any manually-created records with the same name+type untouched.
 	existing, _, err := u.api.ListDNSRecords(ctx, rc, cloudflare.ListDNSRecordsParams{
-		Type: string(r.Type),
-		Name: fqdn,
+		Type:    string(r.Type),
+		Name:    fqdn,
+		Content: r.Value,
 	})
 	if err != nil {
 		return fmt.Errorf("cloudflare list records: %w", err)
@@ -150,7 +153,8 @@ func (u *Upstream) Delete(ctx context.Context, r model.Record) error {
 		slog.Warn("cloudflare record not found for deletion, skipping",
 			"upstream", u.name,
 			"name", fqdn,
-			"type", r.Type)
+			"type", r.Type,
+			"value", r.Value)
 		return nil
 	}
 	for _, rec := range existing {
