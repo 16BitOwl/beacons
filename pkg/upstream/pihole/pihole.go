@@ -86,6 +86,13 @@ func (u *Upstream) Delete(ctx context.Context, r model.Record) error {
 // patchHosts adds or removes an entry from dns.hosts.
 // Entry format: "IP hostname"
 func (u *Upstream) patchHosts(ctx context.Context, r model.Record, remove bool) error {
+	if r.Comment != "" {
+		slog.Debug("pihole does not support record comments, ignoring",
+			"upstream", u.name,
+			"name", r.Name,
+			"type", r.Type)
+	}
+
 	current, err := u.getHosts(ctx)
 	if err != nil {
 		return err
@@ -113,6 +120,13 @@ func (u *Upstream) patchHosts(ctx context.Context, r model.Record, remove bool) 
 // patchCNAME adds or removes an entry from dns.cnameRecords.
 // Entry format: "alias,target" or "alias,target,ttl"
 func (u *Upstream) patchCNAME(ctx context.Context, r model.Record, remove bool) error {
+	if r.Comment != "" {
+		slog.Debug("pihole does not support record comments, ignoring",
+			"upstream", u.name,
+			"name", r.Name,
+			"type", r.Type)
+	}
+
 	current, err := u.getCNAMERecords(ctx)
 	if err != nil {
 		return err

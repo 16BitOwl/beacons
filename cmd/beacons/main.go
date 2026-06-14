@@ -60,13 +60,16 @@ func main() {
 		slog.Info("[dry-run] mode enabled: upstream changes will be logged only")
 	}
 
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	pollInterval := time.Duration(cfg.Sync.PollInterval) * time.Second
 	debounceDelay := time.Duration(cfg.Sync.DebounceDelay) * time.Millisecond
 
 	// Build upstreams
 	upstreams := make(map[string]upstream.Upstream, len(cfg.Upstreams))
 	for name, ucfg := range cfg.Upstreams {
-		u, err := buildUpstream(name, ucfg)
+		u, err := buildUpstream(ctx, name, ucfg)
 		if err != nil {
 			slog.Error("failed to build upstream",
 				"name", name,
@@ -103,9 +106,6 @@ func main() {
 
 	retryInterval := time.Duration(cfg.Sync.RetryInterval) * time.Second
 	syncer := internalsync.New(store, upstreams, retryInterval, m)
-
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
 
 	slog.Info("beacons starting",
 		"sources", len(sources),
@@ -162,10 +162,10 @@ func buildStore(cfg config.StoreConfig) (registry.Store, error) {
 	}
 }
 
-func buildUpstream(name string, cfg model.UpstreamConfig) (upstream.Upstream, error) {
+func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (upstream.Upstream, error) {
 	switch cfg.Type {
 	case "cloudflare":
-		return upstreamcloudflare.New(name, cfg.APIToken, cfg.ZoneID)
+		return upstreamcloudflare.New(ctx, name, cfg.APIToken, cfg.ZoneID)
 	case "pihole":
 		return upstreampihole.New(name, cfg.URL, cfg.Password), nil
 	default:

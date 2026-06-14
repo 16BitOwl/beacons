@@ -16,6 +16,7 @@
 
 defaults:
   ttl: 300
+  comment: "managed by beacons"  # applied to all records unless overridden per-record or per-upstream
 
 http:
   addr: ":9090"  # expose /healthz and /metrics; omit or leave empty to disable
@@ -26,7 +27,7 @@ store:
 
 sync:
   poll_interval: 600  # Docker poll interval in seconds; 0 or omit to disable
-  retry_interval: 300 # retry failed records in seconds; 0 or omit to disable
+  retry_interval: 10  # retry failed records in seconds; 0 or omit to disable
   debounce_ms: 500    # collapse rapid container events after x ms of quiet; 0 to disable
   use_events: true    # also watch Docker events in real-time
   dry_run: false      # set to true (or BEACONS_DRY_RUN=true) to log instead of apply
