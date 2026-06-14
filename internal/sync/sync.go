@@ -12,6 +12,15 @@ import (
 	"github.com/16bitowl/beacons/pkg/upstream"
 )
 
+// Options configures a Syncer.
+type Options struct {
+	Store         registry.Store
+	Upstreams     map[string]upstream.Upstream
+	RetryInterval time.Duration
+	// Metrics is optional; pass nil to disable metrics recording.
+	Metrics *metrics.Metrics
+}
+
 // Syncer orchestrates events from sources into the registry and pushes to upstreams.
 type Syncer struct {
 	store         registry.Store
@@ -20,11 +29,15 @@ type Syncer struct {
 	metrics       *metrics.Metrics
 }
 
-// New creates a Syncer. retryInterval controls how often failed records are
-// re-attempted; pass 0 to disable automatic retries. m may be nil to disable
-// metrics recording.
-func New(store registry.Store, upstreams map[string]upstream.Upstream, retryInterval time.Duration, m *metrics.Metrics) *Syncer {
-	return &Syncer{store: store, upstreams: upstreams, retryInterval: retryInterval, metrics: m}
+// New creates a Syncer. RetryInterval controls how often failed records are
+// re-attempted; pass 0 to disable automatic retries.
+func New(opts Options) *Syncer {
+	return &Syncer{
+		store:         opts.Store,
+		upstreams:     opts.Upstreams,
+		retryInterval: opts.RetryInterval,
+		metrics:       opts.Metrics,
+	}
 }
 
 // Run starts all sources and processes their events until ctx is cancelled.

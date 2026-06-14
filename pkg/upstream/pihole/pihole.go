@@ -50,11 +50,18 @@ type authResponse struct {
 	} `json:"session"`
 }
 
-func New(name, baseURL, password string) *Upstream {
+// Options configures a PiHole upstream adapter.
+type Options struct {
+	Name     string
+	BaseURL  string
+	Password string
+}
+
+func New(opts Options) *Upstream {
 	return &Upstream{
-		name:     name,
-		baseURL:  strings.TrimRight(baseURL, "/"),
-		password: password,
+		name:     opts.Name,
+		baseURL:  strings.TrimRight(opts.BaseURL, "/"),
+		password: opts.Password,
 		client:   &http.Client{Timeout: 10 * time.Second},
 	}
 }

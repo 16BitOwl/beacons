@@ -103,7 +103,12 @@ func main() {
 	m := metrics.New(reg)
 
 	retryInterval := time.Duration(cfg.Sync.RetryInterval) * time.Second
-	syncer := internalsync.New(store, upstreams, retryInterval, m)
+	syncer := internalsync.New(internalsync.Options{
+		Store:         store,
+		Upstreams:     upstreams,
+		RetryInterval: retryInterval,
+		Metrics:       m,
+	})
 
 	slog.Info("beacons starting",
 		"sources", len(sources),
@@ -122,7 +127,11 @@ func main() {
 	if cfg.HTTP.Addr != "" {
 		srv := server.New(cfg.HTTP.Addr, store, reg)
 		go func() {
-			if err := srv.Run(ctx, cfg.HTTP.ReadTimeout, cfg.HTTP.IdleTimeout, cfg.HTTP.ShutdownTimeout); err != nil {
+			if err := srv.Run(ctx, server.Timeouts{
+				ReadTimeout:     time.Duration(cfg.HTTP.ReadTimeout) * time.Second,
+				IdleTimeout:     time.Duration(cfg.HTTP.IdleTimeout) * time.Second,
+				ShutdownTimeout: time.Duration(cfg.HTTP.ShutdownTimeout) * time.Second,
+			}); err != nil {
 				slog.Error("http server error",
 					"err", err)
 			}
@@ -180,9 +189,17 @@ func buildStore(cfg config.StoreConfig) (registry.Store, error) {
 func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (upstream.Upstream, error) {
 	switch cfg.Type {
 	case "cloudflare":
-		return upstreamcloudflare.New(ctx, name, cfg.APIToken, cfg.ZoneID)
+		return upstreamcloudflare.New(ctx, upstreamcloudflare.Options{
+			Name:     name,
+			APIToken: cfg.APIToken,
+			ZoneID:   cfg.ZoneID,
+		})
 	case "pihole":
-		return upstreampihole.New(name, cfg.URL, cfg.Password), nil
+		return upstreampihole.New(upstreampihole.Options{
+			Name:     name,
+			BaseURL:  cfg.URL,
+			Password: cfg.Password,
+		}), nil
 	default:
 		return nil, fmt.Errorf("unknown upstream type %q for %q", cfg.Type, name)
 	}
@@ -191,9 +208,23 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 func buildSource(name string, cfg model.SourceConfig, defaults model.BaseRecord, pollInterval time.Duration, useEvents bool, debounceDelay time.Duration, strict bool, strictValidation bool) (source.Source, error) {
 	switch cfg.Type {
 	case "docker":
-		return sourcedocker.New(name, cfg.Host, defaults, pollInterval, useEvents, debounceDelay, strictValidation)
+		return sourcedocker.New(sourcedocker.Options{
+			Name:             name,
+			Host:             cfg.Host,
+			Defaults:         defaults,
+			PollInterval:     pollInterval,
+			UseEvents:        useEvents,
+			DebounceDelay:    debounceDelay,
+			StrictValidation: strictValidation,
+		})
 	case "yaml":
-		return sourceyaml.New(name, cfg.Glob, defaults, strict, strictValidation), nil
+		return sourceyaml.New(sourceyaml.Options{
+			Name:             name,
+			Glob:             cfg.Glob,
+			Defaults:         defaults,
+			Strict:           strict,
+			StrictValidation: strictValidation,
+		}), nil
 	default:
 		return nil, fmt.Errorf("unknown source type %q for %q", cfg.Type, name)
 	}

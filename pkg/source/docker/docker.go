@@ -19,6 +19,17 @@ import (
 
 const labelPrefix = "dns."
 
+// Options configures a Docker source adapter.
+type Options struct {
+	Name             string
+	Host             string
+	Defaults         model.BaseRecord
+	PollInterval     time.Duration
+	UseEvents        bool
+	DebounceDelay    time.Duration
+	StrictValidation bool
+}
+
 // Source is the Docker source adapter.
 type Source struct {
 	name             string
@@ -31,23 +42,23 @@ type Source struct {
 }
 
 // New creates a new Docker source adapter.
-func New(name string, host string, defaults model.BaseRecord, pollInterval time.Duration, useEvents bool, debounceDelay time.Duration, strictValidation bool) (*Source, error) {
-	opts := []dockerclient.Opt{dockerclient.WithAPIVersionNegotiation()}
-	if host != "" {
-		opts = append(opts, dockerclient.WithHost(host))
+func New(opts Options) (*Source, error) {
+	clientOpts := []dockerclient.Opt{dockerclient.WithAPIVersionNegotiation()}
+	if opts.Host != "" {
+		clientOpts = append(clientOpts, dockerclient.WithHost(opts.Host))
 	}
-	c, err := dockerclient.NewClientWithOpts(opts...)
+	c, err := dockerclient.NewClientWithOpts(clientOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return &Source{
-		name:             name,
+		name:             opts.Name,
 		client:           c,
-		defaults:         defaults,
-		pollInterval:     pollInterval,
-		useEvents:        useEvents,
-		debounceDelay:    debounceDelay,
-		strictValidation: strictValidation,
+		defaults:         opts.Defaults,
+		pollInterval:     opts.PollInterval,
+		useEvents:        opts.UseEvents,
+		debounceDelay:    opts.DebounceDelay,
+		strictValidation: opts.StrictValidation,
 	}, nil
 }
 

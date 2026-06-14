@@ -11,6 +11,13 @@ import (
 	"github.com/cloudflare/cloudflare-go"
 )
 
+// Options configures a Cloudflare upstream adapter.
+type Options struct {
+	Name     string
+	APIToken string
+	ZoneID   string
+}
+
 // Upstream is the Cloudflare upstream adapter.
 type Upstream struct {
 	name     string
@@ -19,19 +26,19 @@ type Upstream struct {
 	zoneName string // e.g. "example.com", fetched from Cloudflare on init
 }
 
-func New(ctx context.Context, name, apiToken, zoneID string) (*Upstream, error) {
-	api, err := cloudflare.NewWithAPIToken(apiToken)
+func New(ctx context.Context, opts Options) (*Upstream, error) {
+	api, err := cloudflare.NewWithAPIToken(opts.APIToken)
 	if err != nil {
 		return nil, err
 	}
-	zone, err := api.ZoneDetails(ctx, zoneID)
+	zone, err := api.ZoneDetails(ctx, opts.ZoneID)
 	if err != nil {
 		return nil, fmt.Errorf("cloudflare fetch zone details: %w", err)
 	}
 	slog.Debug("cloudflare upstream initialised",
-		"upstream", name,
+		"upstream", opts.Name,
 		"zone", zone.Name)
-	return &Upstream{name: name, api: api, zoneID: zoneID, zoneName: zone.Name}, nil
+	return &Upstream{name: opts.Name, api: api, zoneID: opts.ZoneID, zoneName: zone.Name}, nil
 }
 
 // fqdn returns name as a fully qualified domain name within the zone.

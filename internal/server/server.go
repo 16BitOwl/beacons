@@ -35,13 +35,20 @@ func New(addr string, store registry.Store, gatherer prometheus.Gatherer) *Serve
 	return s
 }
 
+// Timeouts configures the HTTP server timeout values.
+type Timeouts struct {
+	ReadTimeout     time.Duration
+	IdleTimeout     time.Duration
+	ShutdownTimeout time.Duration
+}
+
 // Run starts the HTTP server and blocks until ctx is cancelled or a listen
 // error occurs.
-func (s *Server) Run(ctx context.Context, readTimeout, idleTimeout, shutdownTimeout int) error {
+func (s *Server) Run(ctx context.Context, t Timeouts) error {
 	srv := &http.Server{
 		Handler:     s.handler,
-		ReadTimeout: time.Duration(readTimeout) * time.Second,
-		IdleTimeout: time.Duration(idleTimeout) * time.Second,
+		ReadTimeout: t.ReadTimeout,
+		IdleTimeout: t.IdleTimeout,
 	}
 
 	ln, err := net.Listen("tcp", s.addr)
@@ -53,7 +60,7 @@ func (s *Server) Run(ctx context.Context, readTimeout, idleTimeout, shutdownTime
 
 	go func() {
 		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), time.Duration(shutdownTimeout)*time.Second)
+		shutCtx, cancel := context.WithTimeout(context.Background(), t.ShutdownTimeout)
 		defer cancel()
 		_ = srv.Shutdown(shutCtx)
 	}()

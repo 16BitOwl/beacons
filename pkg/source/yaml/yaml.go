@@ -17,6 +17,15 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+// Options configures a YAML source adapter.
+type Options struct {
+	Name             string
+	Glob             string
+	Defaults         model.BaseRecord
+	Strict           bool
+	StrictValidation bool
+}
+
 // Source is the YAML file source adapter.
 type Source struct {
 	name             string
@@ -26,8 +35,14 @@ type Source struct {
 	strictValidation bool
 }
 
-func New(name string, glob string, defaults model.BaseRecord, strict bool, strictValidation bool) *Source {
-	return &Source{name: name, glob: glob, defaults: defaults, strict: strict, strictValidation: strictValidation}
+func New(opts Options) *Source {
+	return &Source{
+		name:             opts.Name,
+		glob:             opts.Glob,
+		defaults:         opts.Defaults,
+		strict:           opts.Strict,
+		strictValidation: opts.StrictValidation,
+	}
 }
 
 func (s *Source) Name() string { return s.name }
