@@ -11,9 +11,6 @@ import (
 
 // Config is the top-level beacons configuration
 type Config struct {
-	// LogLevel sets the log verbosity: debug, info, warn, error
-	LogLevel string `yaml:"log_level"`
-
 	// Defaults applied to all records unless overridden
 	Defaults model.BaseRecord `yaml:"defaults"`
 
@@ -87,7 +84,6 @@ type SyncConfig struct {
 // Load various default values for the configurations of Beacons
 func defaults() Config {
 	return Config{
-		LogLevel: "info",
 		Sync: SyncConfig{
 			PollInterval:  300,
 			DebounceDelay: 500,

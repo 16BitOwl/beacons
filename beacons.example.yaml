@@ -1,6 +1,12 @@
-# Any config field can be overridden via environment variables without modifying
-# this file. Variables follow the pattern BEACONS_<YAML_PATH>, where path
-# segments are joined with single underscores:
+# Logging is configured via environment variables only, so it takes effect
+# before the config file is parsed. These two are not available as YAML fields.
+#
+#   BEACONS_LOG_LEVEL   debug | info | warn | error  (default: info)
+#   BEACONS_LOG_FORMAT  text | json                  (default: text)
+#
+# All other config fields can be overridden via environment variables without
+# modifying this file. Variables follow the pattern BEACONS_<YAML_PATH>, where
+# path segments are joined with single underscores:
 #
 #   BEACONS_SYNC_DRY_RUN=true
 #   BEACONS_DEFAULTS_TTL=60

@@ -33,9 +33,7 @@ func main() {
 	healthAddr := flag.String("healthcheck-addr", "http://localhost:9090", "base URL for -healthcheck")
 	flag.Parse()
 
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: logLevel(os.Getenv("BEACONS_LOG_LEVEL")),
-	})))
+	initLogger()
 
 	if *healthcheck {
 		resp, err := http.Get(*healthAddr + "/healthz") //nolint:noctx
@@ -145,8 +143,23 @@ func main() {
 	}
 }
 
-func logLevel(l string) slog.Level {
-	switch strings.ToLower(l) {
+// initLogger configures the default slog logger from environment variables.
+// Settings for logs are intentionally env-only so logging is ready before the
+// config file is parsed.
+func initLogger() {
+	opts := &slog.HandlerOptions{Level: logLevel(os.Getenv("BEACONS_LOG_LEVEL"))}
+
+	var handler slog.Handler
+	if strings.EqualFold(os.Getenv("BEACONS_LOG_FORMAT"), "json") {
+		handler = slog.NewJSONHandler(os.Stdout, opts)
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, opts)
+	}
+	slog.SetDefault(slog.New(handler))
+}
+
+func logLevel(level string) slog.Level {
+	switch strings.ToLower(level) {
 	case "debug":
 		return slog.LevelDebug
 	case "warn":
