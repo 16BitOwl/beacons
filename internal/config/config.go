@@ -1,11 +1,11 @@
 package config
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/16bitowl/beacons/internal/envutil"
 	"github.com/16bitowl/beacons/internal/model"
+	"github.com/16bitowl/beacons/internal/validate"
 	"github.com/goccy/go-yaml"
 )
 
@@ -35,40 +35,40 @@ type Config struct {
 type HTTPConfig struct {
 	// Addr is the TCP address to listen on, e.g. ":9090".
 	// An empty string disables the server.
-	Addr string `yaml:"addr"`
+	Addr string `yaml:"addr" validate:"omitempty,hostname_port"`
 
 	// ReadTimeout configure the HTTP server read timeout
 	// in seconds (0 = infinite)
-	ReadTimeout int `yaml:"read_timeout"`
+	ReadTimeout int `yaml:"read_timeout" validate:"min=0"`
 
 	// IdleTimeout configure the HTTP server read timeout
 	// in seconds (0 = infinite)
-	IdleTimeout int `yaml:"idle_timeout"`
+	IdleTimeout int `yaml:"idle_timeout" validate:"min=0"`
 
 	// ShutdownTimeout configure the HTTP server read timeout
 	// in seconds, must be none zero
-	ShutdownTimeout int `yaml:"shutdown_timeout"`
+	ShutdownTimeout int `yaml:"shutdown_timeout" validate:"gt=0"`
 }
 
 // StoreConfig controls how records are persisted between restarts.
 type StoreConfig struct {
 	// Type is the store backend: "memory" or "file".
-	Type string `yaml:"type"`
+	Type string `yaml:"type" validate:"required,oneof=memory file"`
 
 	// Path is the file path used by the file store.
-	Path string `yaml:"path"`
+	Path string `yaml:"path" validate:"required_if=Type file"`
 }
 
 type SyncConfig struct {
 	// PollInterval is the Docker polling interval in seconds (0 = disabled)
-	PollInterval int `yaml:"poll_interval"`
+	PollInterval int `yaml:"poll_interval" validate:"min=0"`
 
 	// UseEvents enables real-time Docker event watching alongside polling
 	UseEvents bool `yaml:"use_events"`
 
 	// DebounceDelay collapses rapid container events (kill/stop/die/start) into
 	// a single action after this many milliseconds of quiet. 0 disables debouncing.
-	DebounceDelay int `yaml:"debounce_ms"`
+	DebounceDelay int `yaml:"debounce_ms" validate:"min=0"`
 
 	// DryRun logs upstream operations instead of applying them
 	DryRun bool `yaml:"dry_run"`
@@ -76,9 +76,14 @@ type SyncConfig struct {
 	// StrictEnv causes startup to fail if any ${VAR} references are unset
 	StrictEnv bool `yaml:"strict_env"`
 
+	// StrictValidation causes invalid records from sources (Docker labels,
+	// YAML files) to be treated as fatal errors rather than warnings.
+	// Defaults to false — invalid records are skipped with a warning.
+	StrictValidation bool `yaml:"strict_validation"`
+
 	// RetryInterval is how often (in seconds) the syncer re-attempts records
 	// that previously failed to push to their upstream. 0 disables retries.
-	RetryInterval int `yaml:"retry_interval"`
+	RetryInterval int `yaml:"retry_interval" validate:"min=0"`
 }
 
 // Load various default values for the configurations of Beacons
@@ -135,9 +140,8 @@ func Load(path string) (*Config, error) {
 
 	overlayEnv(&cfg)
 
-	// Validate the config
-	if cfg.HTTP.ShutdownTimeout <= 0 {
-		return nil, fmt.Errorf("shutdown_timeout must be larger than 0")
+	if err := validate.Struct(&cfg); err != nil {
+		return nil, err
 	}
 
 	return &cfg, nil

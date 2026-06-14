@@ -2,6 +2,7 @@ package yaml
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/16bitowl/beacons/internal/envutil"
 	"github.com/16bitowl/beacons/internal/model"
+	"github.com/16bitowl/beacons/internal/validate"
 	"github.com/16bitowl/beacons/pkg/source"
 	"github.com/fsnotify/fsnotify"
 	"github.com/goccy/go-yaml"
@@ -17,14 +19,15 @@ import (
 
 // Source is the YAML file source adapter.
 type Source struct {
-	name     string
-	glob     string
-	defaults model.BaseRecord
-	strict   bool
+	name             string
+	glob             string
+	defaults         model.BaseRecord
+	strict           bool
+	strictValidation bool
 }
 
-func New(name string, glob string, defaults model.BaseRecord, strict bool) *Source {
-	return &Source{name: name, glob: glob, defaults: defaults, strict: strict}
+func New(name string, glob string, defaults model.BaseRecord, strict bool, strictValidation bool) *Source {
+	return &Source{name: name, glob: glob, defaults: defaults, strict: strict, strictValidation: strictValidation}
 }
 
 func (s *Source) Name() string { return s.name }
@@ -102,7 +105,7 @@ func (s *Source) loadAll(ch chan<- source.Event) {
 
 	var allRecords []model.Record
 	for _, f := range files {
-		records, err := parseFile(s.name, f, s.defaults, s.strict)
+		records, err := parseFile(s.name, f, s.defaults, s.strict, s.strictValidation)
 		if err != nil {
 			slog.Error("yaml parse failed",
 				"file", f,
@@ -157,7 +160,7 @@ type fileSchema struct {
 	Records  map[string]fileRecord `yaml:"records"`
 }
 
-func parseFile(sourceName, path string, globalDefaults model.BaseRecord, strict bool) ([]model.Record, error) {
+func parseFile(sourceName, path string, globalDefaults model.BaseRecord, strict bool, strictValidation bool) ([]model.Record, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -219,6 +222,18 @@ func parseFile(sourceName, path string, globalDefaults model.BaseRecord, strict 
 			if fields.Comment != "" {
 				r.Comment = fields.Comment
 			}
+
+			recPath := fmt.Sprintf("yaml://%s/records/%s/%s", path, recordID, upstreamName)
+			if err := validate.StructWithPrefix(&r, recPath); err != nil {
+				if strictValidation {
+					return nil, err
+				}
+				slog.Warn("invalid yaml record, skipping",
+					"path", recPath,
+					"errors", err.Error())
+				continue
+			}
+
 			records = append(records, r)
 		}
 	}

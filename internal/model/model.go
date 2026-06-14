@@ -46,11 +46,11 @@ type Record struct {
 	SourceName string `json:"source_name"`
 
 	// Upstream is the named upstream instance this record targets.
-	Upstream string `json:"upstream"`
+	Upstream string `json:"upstream" validate:"required"`
 
-	Type  RecordType `yaml:"type"  json:"type"`
-	Name  string     `yaml:"name"  json:"name"`
-	Value string     `yaml:"value" json:"value"`
+	Type  RecordType `yaml:"type"  json:"type"  validate:"required,oneof=A AAAA CNAME TXT MX SRV NS CAA"`
+	Name  string     `yaml:"name"  json:"name"  validate:"required"`
+	Value string     `yaml:"value" json:"value" validate:"required"`
 
 	// Sync status — set by the Syncer after each upstream operation.
 	Status    RecordStatus `json:"status,omitempty"`
@@ -60,24 +60,24 @@ type Record struct {
 
 // UpstreamConfig holds the configuration for a named upstream adapter instance.
 type UpstreamConfig struct {
-	Type string `yaml:"type"`
+	Type string `yaml:"type" validate:"required,oneof=cloudflare pihole"`
 
 	// Cloudflare
-	APIToken string `yaml:"api_token"`
-	ZoneID   string `yaml:"zone_id"`
+	APIToken string `yaml:"api_token" validate:"required_if=Type cloudflare"`
+	ZoneID   string `yaml:"zone_id"   validate:"required_if=Type cloudflare"`
 
 	// PiHole
-	URL      string `yaml:"url"`
+	URL      string `yaml:"url"      validate:"required_if=Type pihole,omitempty,url"`
 	Password string `yaml:"password"`
 }
 
 // SourceConfig holds the configuration for a named source adapter instance.
 type SourceConfig struct {
-	Type string `yaml:"type"`
+	Type string `yaml:"type" validate:"required,oneof=docker yaml"`
 
 	// Docker
 	Host string `yaml:"host"` // e.g. unix:///var/run/docker.sock
 
 	// YAML
-	Glob string `yaml:"glob"` // e.g. /config/*.yaml
+	Glob string `yaml:"glob" validate:"required_if=Type yaml"` // e.g. /config/*.yaml
 }

@@ -178,10 +178,14 @@ func TestDynamicMapEntryWithUnderscoredKey(t *testing.T) {
 // created from env vars in the same section.
 func TestMultipleDynamicMapEntries(t *testing.T) {
 	setenv(t, map[string]string{
-		"BEACONS_UPSTREAMS__CF_ZONE_A__TYPE":    "cloudflare",
-		"BEACONS_UPSTREAMS__CF_ZONE_B__TYPE":    "cloudflare",
-		"BEACONS_SOURCES__DOCKER_LOCAL__TYPE":   "docker",
-		"BEACONS_SOURCES__DOCKER_LOCAL__HOST":   "unix:///var/run/docker.sock",
+		"BEACONS_UPSTREAMS__CF_ZONE_A__TYPE":      "cloudflare",
+		"BEACONS_UPSTREAMS__CF_ZONE_A__API_TOKEN": "tok-a",
+		"BEACONS_UPSTREAMS__CF_ZONE_A__ZONE_ID":   "zone-a",
+		"BEACONS_UPSTREAMS__CF_ZONE_B__TYPE":      "cloudflare",
+		"BEACONS_UPSTREAMS__CF_ZONE_B__API_TOKEN": "tok-b",
+		"BEACONS_UPSTREAMS__CF_ZONE_B__ZONE_ID":   "zone-b",
+		"BEACONS_SOURCES__DOCKER_LOCAL__TYPE":     "docker",
+		"BEACONS_SOURCES__DOCKER_LOCAL__HOST":     "unix:///var/run/docker.sock",
 	})
 
 	cfg, err := Load("")
