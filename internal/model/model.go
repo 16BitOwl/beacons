@@ -27,9 +27,9 @@ const (
 
 // BaseRecord holds fields common to all DNS records and shared defaults.
 type BaseRecord struct {
-	TTL      int    `yaml:"ttl"`
-	Priority int    `yaml:"priority"` // used by MX, SRV
-	Comment  string `yaml:"comment"`
+	TTL      int    `yaml:"ttl"      json:"ttl"`
+	Priority int    `yaml:"priority" json:"priority"` // used by MX, SRV
+	Comment  string `yaml:"comment"  json:"comment"`
 }
 
 // Record is a fully resolved DNS record destined for a specific upstream instance.
@@ -37,20 +37,20 @@ type Record struct {
 	BaseRecord `yaml:",inline"`
 
 	// ID is the record identifier from the label/yaml (e.g. "web", "api").
-	ID string
+	ID string `json:"id"`
 
 	// SourceID is the originating source item identifier (container ID, file path, etc.).
-	SourceID string
+	SourceID string `json:"source_id"`
 
 	// SourceName is the name of the source adapter instance that produced this record.
-	SourceName string
+	SourceName string `json:"source_name"`
 
 	// Upstream is the named upstream instance this record targets.
-	Upstream string
+	Upstream string `json:"upstream"`
 
-	Type  RecordType `yaml:"type"`
-	Name  string     `yaml:"name"`
-	Value string     `yaml:"value"`
+	Type  RecordType `yaml:"type"  json:"type"`
+	Name  string     `yaml:"name"  json:"name"`
+	Value string     `yaml:"value" json:"value"`
 
 	// Sync status — set by the Syncer after each upstream operation.
 	Status    RecordStatus `json:"status,omitempty"`

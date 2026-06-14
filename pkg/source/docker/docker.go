@@ -79,13 +79,21 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 		eventC, errC = s.client.Events(ctx, dockerevents.ListOptions{Filters: f})
 	}
 
-	// debounce state: per-container pending timer and last event
+	// debounce state: per-container pending timer and generation counter.
+	// seq guards against a stale timer fire being processed after a newer event
+	// has already replaced the pending entry for the same container.
 	type pending struct {
 		timer *time.Timer
-		msg   dockerevents.Message
+		seq   uint64
 	}
+	type debouncedMsg struct {
+		msg dockerevents.Message
+		seq uint64
+	}
+
+	var nextSeq uint64
 	debounced := map[string]*pending{}
-	debouncedC := make(chan dockerevents.Message, 64)
+	debouncedC := make(chan debouncedMsg, 64)
 
 	for {
 		select {
@@ -110,18 +118,24 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 				continue
 			}
 			id := msg.Actor.ID
+			nextSeq++
+			seq := nextSeq
+			dm := debouncedMsg{msg: msg, seq: seq} // captured by value for the closure
 			if p, ok := debounced[id]; ok {
 				p.timer.Stop()
-				p.msg = msg
-				p.timer = time.AfterFunc(s.debounceDelay, func() { debouncedC <- p.msg })
+				p.seq = seq
+				p.timer = time.AfterFunc(s.debounceDelay, func() { debouncedC <- dm })
 			} else {
-				p := &pending{msg: msg}
-				p.timer = time.AfterFunc(s.debounceDelay, func() { debouncedC <- p.msg })
+				p := &pending{seq: seq}
+				p.timer = time.AfterFunc(s.debounceDelay, func() { debouncedC <- dm })
 				debounced[id] = p
 			}
-		case msg := <-debouncedC:
-			delete(debounced, msg.Actor.ID)
-			s.handleEvent(ctx, msg, ch)
+		case dm := <-debouncedC:
+			if p, ok := debounced[dm.msg.Actor.ID]; ok && p.seq == dm.seq {
+				delete(debounced, dm.msg.Actor.ID)
+				s.handleEvent(ctx, dm.msg, ch)
+			}
+			// stale fire (superseded by a newer event for the same container) — discard
 		case <-pollC:
 			if err := s.poll(ctx, ch); err != nil {
 				slog.Error("docker poll failed",
