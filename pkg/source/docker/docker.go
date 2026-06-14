@@ -2,12 +2,14 @@ package docker
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/16bitowl/beacons/internal/model"
+	"github.com/16bitowl/beacons/internal/validate"
 	"github.com/16bitowl/beacons/pkg/source"
 	"github.com/docker/docker/api/types/container"
 	dockerevents "github.com/docker/docker/api/types/events"
@@ -19,16 +21,17 @@ const labelPrefix = "dns."
 
 // Source is the Docker source adapter.
 type Source struct {
-	name          string
-	client        *dockerclient.Client
-	defaults      model.BaseRecord
-	pollInterval  time.Duration
-	useEvents     bool
-	debounceDelay time.Duration
+	name             string
+	client           *dockerclient.Client
+	defaults         model.BaseRecord
+	pollInterval     time.Duration
+	useEvents        bool
+	debounceDelay    time.Duration
+	strictValidation bool
 }
 
 // New creates a new Docker source adapter.
-func New(name string, host string, defaults model.BaseRecord, pollInterval time.Duration, useEvents bool, debounceDelay time.Duration) (*Source, error) {
+func New(name string, host string, defaults model.BaseRecord, pollInterval time.Duration, useEvents bool, debounceDelay time.Duration, strictValidation bool) (*Source, error) {
 	opts := []dockerclient.Opt{dockerclient.WithAPIVersionNegotiation()}
 	if host != "" {
 		opts = append(opts, dockerclient.WithHost(host))
@@ -38,12 +41,13 @@ func New(name string, host string, defaults model.BaseRecord, pollInterval time.
 		return nil, err
 	}
 	return &Source{
-		name:          name,
-		client:        c,
-		defaults:      defaults,
-		pollInterval:  pollInterval,
-		useEvents:     useEvents,
-		debounceDelay: debounceDelay,
+		name:             name,
+		client:           c,
+		defaults:         defaults,
+		pollInterval:     pollInterval,
+		useEvents:        useEvents,
+		debounceDelay:    debounceDelay,
+		strictValidation: strictValidation,
 	}, nil
 }
 
@@ -157,7 +161,14 @@ func (s *Source) poll(ctx context.Context, ch chan<- source.Event) error {
 
 	var records []model.Record
 	for _, c := range containers {
-		recs := parseLabels(s.name, c.ID, c.Labels, s.defaults)
+		recs, err := parseLabels(s.name, c.ID, c.Labels, s.defaults, s.strictValidation)
+		if err != nil {
+			slog.Error("docker label validation failed",
+				"source", s.name,
+				"container", c.ID[:12],
+				"err", err)
+			continue
+		}
 		if len(recs) == 0 {
 			continue
 		}
@@ -195,7 +206,14 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 				"err", err)
 			return
 		}
-		records := parseLabels(s.name, info.ID, info.Config.Labels, s.defaults)
+		records, err := parseLabels(s.name, info.ID, info.Config.Labels, s.defaults, s.strictValidation)
+		if err != nil {
+			slog.Error("docker label validation failed",
+				"source", s.name,
+				"container", msg.Actor.ID[:12],
+				"err", err)
+			return
+		}
 		if len(records) > 0 {
 			slog.Info("container has dns records, queuing upsert",
 				"source", s.name,
@@ -233,9 +251,9 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 //	dns.<record-id>.<upstream>.type=...
 //	dns.<record-id>.<upstream>.value=...
 //	dns.<record-id>.<upstream>.ttl=...   (overrides base)
-func parseLabels(sourceName, containerID string, labels map[string]string, defaults model.BaseRecord) []model.Record {
+func parseLabels(sourceName, containerID string, labels map[string]string, defaults model.BaseRecord, strictValidation bool) ([]model.Record, error) {
 	if labels[labelPrefix+"enable"] != "true" {
-		return nil
+		return nil, nil
 	}
 
 	// Parse base TTL override from labels.
@@ -295,10 +313,22 @@ func parseLabels(sourceName, containerID string, labels map[string]string, defau
 			if v, ok := fields["comment"]; ok {
 				r.Comment = v
 			}
+
+			path := fmt.Sprintf("docker://%s/%s/%s", containerID[:12], recordID, upstreamName)
+			if err := validate.StructWithPrefix(&r, path); err != nil {
+				if strictValidation {
+					return nil, err
+				}
+				slog.Warn("invalid docker label record, skipping",
+					"path", path,
+					"errors", err.Error())
+				continue
+			}
+
 			records = append(records, r)
 		}
 	}
-	return records
+	return records, nil
 }
 
 // uniqueSourceIDs counts distinct SourceIDs in a record slice.

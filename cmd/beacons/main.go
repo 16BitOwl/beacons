@@ -80,7 +80,7 @@ func main() {
 	// Build sources
 	var sources []source.Source
 	for name, scfg := range cfg.Sources {
-		s, err := buildSource(name, scfg, cfg.Defaults, pollInterval, cfg.Sync.UseEvents, debounceDelay, cfg.Sync.StrictEnv)
+		s, err := buildSource(name, scfg, cfg.Defaults, pollInterval, cfg.Sync.UseEvents, debounceDelay, cfg.Sync.StrictEnv, cfg.Sync.StrictValidation)
 		if err != nil {
 			slog.Error("failed to build source",
 				"name", name,
@@ -188,12 +188,12 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 	}
 }
 
-func buildSource(name string, cfg model.SourceConfig, defaults model.BaseRecord, pollInterval time.Duration, useEvents bool, debounceDelay time.Duration, strict bool) (source.Source, error) {
+func buildSource(name string, cfg model.SourceConfig, defaults model.BaseRecord, pollInterval time.Duration, useEvents bool, debounceDelay time.Duration, strict bool, strictValidation bool) (source.Source, error) {
 	switch cfg.Type {
 	case "docker":
-		return sourcedocker.New(name, cfg.Host, defaults, pollInterval, useEvents, debounceDelay)
+		return sourcedocker.New(name, cfg.Host, defaults, pollInterval, useEvents, debounceDelay, strictValidation)
 	case "yaml":
-		return sourceyaml.New(name, cfg.Glob, defaults, strict), nil
+		return sourceyaml.New(name, cfg.Glob, defaults, strict, strictValidation), nil
 	default:
 		return nil, fmt.Errorf("unknown source type %q for %q", cfg.Type, name)
 	}
