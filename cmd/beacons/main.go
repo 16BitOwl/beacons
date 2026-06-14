@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/16bitowl/beacons/internal/config"
+	hc "github.com/16bitowl/beacons/internal/healthcheck"
 	"github.com/16bitowl/beacons/internal/metrics"
 	"github.com/16bitowl/beacons/internal/model"
 	"github.com/16bitowl/beacons/internal/registry"
@@ -29,23 +29,16 @@ import (
 
 func main() {
 	cfgPath := flag.String("config", "beacons.yaml", "path to config file")
-	healthcheck := flag.Bool("healthcheck", false, "hit /healthz and exit 0/1 (for use as Docker HEALTHCHECK)")
+	doHealthcheck := flag.Bool("healthcheck", false, "hit /healthz and exit 0/1 (for use as Docker HEALTHCHECK)")
 	healthAddr := flag.String("healthcheck-addr", "http://localhost:9090", "base URL for -healthcheck")
 	flag.Parse()
 
 	initLogger()
 
-	if *healthcheck {
-		resp, err := http.Get(*healthAddr + "/healthz") //nolint:noctx
-		if err != nil {
+	if *doHealthcheck {
+		if err := hc.Check(*healthAddr); err != nil {
 			slog.Error("healthcheck failed",
 				"err", err)
-			os.Exit(1)
-		}
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			slog.Error("healthcheck failed",
-				"status", resp.StatusCode)
 			os.Exit(1)
 		}
 		os.Exit(0)
