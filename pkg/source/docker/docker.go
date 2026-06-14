@@ -176,7 +176,7 @@ func (s *Source) poll(ctx context.Context, ch chan<- source.Event) error {
 		if err != nil {
 			slog.Error("docker label validation failed",
 				"source", s.name,
-				"container", c.ID[:12],
+				"container", shortID(c.ID),
 				"err", err)
 			continue
 		}
@@ -185,7 +185,7 @@ func (s *Source) poll(ctx context.Context, ch chan<- source.Event) error {
 		}
 		slog.Debug("discovered container with dns labels",
 			"source", s.name,
-			"container", c.ID[:12],
+			"container", shortID(c.ID),
 			"records", len(recs))
 		records = append(records, recs...)
 	}
@@ -209,11 +209,11 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 	case "start":
 		slog.Info("container started, inspecting labels",
 			"source", s.name,
-			"container", msg.Actor.ID[:12])
+			"container", shortID(msg.Actor.ID))
 		info, err := s.client.ContainerInspect(ctx, msg.Actor.ID)
 		if err != nil {
 			slog.Error("docker inspect failed",
-				"id", msg.Actor.ID[:12],
+				"id", shortID(msg.Actor.ID),
 				"err", err)
 			return
 		}
@@ -221,14 +221,14 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 		if err != nil {
 			slog.Error("docker label validation failed",
 				"source", s.name,
-				"container", msg.Actor.ID[:12],
+				"container", shortID(msg.Actor.ID),
 				"err", err)
 			return
 		}
 		if len(records) > 0 {
 			slog.Info("container has dns records, queuing upsert",
 				"source", s.name,
-				"container", msg.Actor.ID[:12],
+				"container", shortID(msg.Actor.ID),
 				"records", len(records))
 			ch <- source.Event{
 				Type:       source.EventUpsert,
@@ -239,12 +239,12 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 		} else {
 			slog.Debug("container has no dns labels, skipping",
 				"source", s.name,
-				"container", msg.Actor.ID[:12])
+				"container", shortID(msg.Actor.ID))
 		}
 	case "die", "stop", "kill":
 		slog.Info("container stopped, queuing delete",
 			"source", s.name,
-			"container", msg.Actor.ID[:12],
+			"container", shortID(msg.Actor.ID),
 			"action", msg.Action)
 		ch <- source.Event{
 			Type:       source.EventDelete,
@@ -325,7 +325,7 @@ func parseLabels(sourceName, containerID string, labels map[string]string, defau
 				r.Comment = v
 			}
 
-			path := fmt.Sprintf("docker://%s/%s/%s", containerID[:12], recordID, upstreamName)
+			path := fmt.Sprintf("docker://%s/%s/%s", shortID(containerID), recordID, upstreamName)
 			if err := validate.StructWithPrefix(&r, path); err != nil {
 				if strictValidation {
 					return nil, err
@@ -349,4 +349,11 @@ func uniqueSourceIDs(records []model.Record) int {
 		seen[r.SourceID] = struct{}{}
 	}
 	return len(seen)
+}
+
+func shortID(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:12]
 }

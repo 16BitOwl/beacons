@@ -300,3 +300,38 @@ func TestUniqueSourceIDs_Mixed(t *testing.T) {
 		t.Errorf("got %d, want 3", n)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// shortID
+// ---------------------------------------------------------------------------
+
+func TestShortID_LongID_TruncatedTo12(t *testing.T) {
+	id := "abcdefghijklmnopqrstuvwxyz"
+	got := shortID(id)
+	if len(got) != 12 {
+		t.Errorf("len = %d, want 12", len(got))
+	}
+	if got != "abcdefghijkl" {
+		t.Errorf("got %q, want abcdefghijkl", got)
+	}
+}
+
+func TestShortID_ExactlyTwelve_Unchanged(t *testing.T) {
+	id := "123456789012"
+	if got := shortID(id); got != id {
+		t.Errorf("got %q, want %q", got, id)
+	}
+}
+
+func TestShortID_ShorterThanTwelve_Unchanged(t *testing.T) {
+	id := "short"
+	if got := shortID(id); got != id {
+		t.Errorf("got %q, want %q", got, id)
+	}
+}
+
+func TestShortID_Empty_Unchanged(t *testing.T) {
+	if got := shortID(""); got != "" {
+		t.Errorf("got %q, want empty string", got)
+	}
+}
