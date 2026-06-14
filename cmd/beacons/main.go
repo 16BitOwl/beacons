@@ -39,12 +39,14 @@ func main() {
 	if *healthcheck {
 		resp, err := http.Get(*healthAddr + "/healthz") //nolint:noctx
 		if err != nil {
-			slog.Error("healthcheck failed", "err", err)
+			slog.Error("healthcheck failed",
+				"err", err)
 			os.Exit(1)
 		}
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			slog.Error("healthcheck failed", "status", resp.StatusCode)
+			slog.Error("healthcheck failed",
+				"status", resp.StatusCode)
 			os.Exit(1)
 		}
 		os.Exit(0)
@@ -52,7 +54,8 @@ func main() {
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		slog.Error("failed to load config", "err", err)
+		slog.Error("failed to load config",
+			"err", err)
 		os.Exit(1)
 	}
 
@@ -87,7 +90,9 @@ func main() {
 	for name, scfg := range cfg.Sources {
 		s, err := buildSource(name, scfg, cfg.Defaults, pollInterval, cfg.Sync.UseEvents, debounceDelay, cfg.Sync.StrictEnv)
 		if err != nil {
-			slog.Error("failed to build source", "name", name, "err", err)
+			slog.Error("failed to build source",
+				"name", name,
+				"err", err)
 			os.Exit(1)
 		}
 		sources = append(sources, s)
@@ -95,7 +100,8 @@ func main() {
 
 	store, err := buildStore(cfg.Store)
 	if err != nil {
-		slog.Error("failed to initialise store", "err", err)
+		slog.Error("failed to initialise store",
+			"err", err)
 		os.Exit(1)
 	}
 
@@ -124,14 +130,16 @@ func main() {
 	if cfg.HTTP.Addr != "" {
 		srv := server.New(cfg.HTTP.Addr, store, reg)
 		go func() {
-			if err := srv.Run(ctx); err != nil {
-				slog.Error("http server error", "err", err)
+			if err := srv.Run(ctx, cfg.HTTP.ReadTimeout, cfg.HTTP.IdleTimeout, cfg.HTTP.ShutdownTimeout); err != nil {
+				slog.Error("http server error",
+					"err", err)
 			}
 		}()
 	}
 
 	if err := syncer.Run(ctx, sources); err != nil {
-		slog.Error("syncer exited with error", "err", err)
+		slog.Error("syncer exited with error",
+			"err", err)
 		os.Exit(1)
 	}
 }

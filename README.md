@@ -30,6 +30,7 @@ dns.ttl: "300"
 dns.<id>.<upstream>.type: "A"
 dns.<id>.<upstream>.name: "host.example.com"
 dns.<id>.<upstream>.value: "1.2.3.4"
+dns.<id>.<upstream>.comment: "Managed by Beacons"
 ```
 
 ## HTTP endpoints

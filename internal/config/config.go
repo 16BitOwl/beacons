@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/16bitowl/beacons/internal/envutil"
@@ -10,7 +11,7 @@ import (
 
 // Config is the top-level beacons configuration
 type Config struct {
-	// LogLevel sets the log verbosity: debug, info, warn, error (default: info)
+	// LogLevel sets the log verbosity: debug, info, warn, error
 	LogLevel string `yaml:"log_level"`
 
 	// Defaults applied to all records unless overridden
@@ -38,11 +39,23 @@ type HTTPConfig struct {
 	// Addr is the TCP address to listen on, e.g. ":9090".
 	// An empty string disables the server.
 	Addr string `yaml:"addr"`
+
+	// ReadTimeout configure the HTTP server read timeout
+	// in seconds (0 = infinite)
+	ReadTimeout int `yaml:"read_timeout"`
+
+	// IdleTimeout configure the HTTP server read timeout
+	// in seconds (0 = infinite)
+	IdleTimeout int `yaml:"idle_timeout"`
+
+	// ShutdownTimeout configure the HTTP server read timeout
+	// in seconds, must be none zero
+	ShutdownTimeout int `yaml:"shutdown_timeout"`
 }
 
 // StoreConfig controls how records are persisted between restarts.
 type StoreConfig struct {
-	// Type is the store backend: "memory" (default) or "file".
+	// Type is the store backend: "memory" or "file".
 	Type string `yaml:"type"`
 
 	// Path is the file path used by the file store.
@@ -71,11 +84,35 @@ type SyncConfig struct {
 	RetryInterval int `yaml:"retry_interval"`
 }
 
+// Load various default values for the configurations of Beacons
+func defaults() Config {
+	return Config{
+		LogLevel: "info",
+		Sync: SyncConfig{
+			PollInterval:  300,
+			DebounceDelay: 500,
+			RetryInterval: 30,
+			DryRun:        false,
+			StrictEnv:     true,
+			UseEvents:     true,
+		},
+		Store: StoreConfig{
+			Type: "memory",
+		},
+		HTTP: HTTPConfig{
+			Addr:            ":9090",
+			ReadTimeout:     5,
+			IdleTimeout:     60,
+			ShutdownTimeout: 5,
+		},
+	}
+}
+
 // Load reads and parses the config file at the given path, then overlays any
 // BEACONS_* environment variables. The config file is optional — if path is
 // empty or the file does not exist, config is sourced entirely from env vars.
 func Load(path string) (*Config, error) {
-	var cfg Config
+	cfg := defaults()
 
 	if path != "" {
 		raw, err := os.ReadFile(path)
@@ -101,5 +138,11 @@ func Load(path string) (*Config, error) {
 	}
 
 	overlayEnv(&cfg)
+
+	// Validate the config
+	if cfg.HTTP.ShutdownTimeout <= 0 {
+		return nil, fmt.Errorf("shutdown_timeout must be larger than 0")
+	}
+
 	return &cfg, nil
 }

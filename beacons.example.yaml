@@ -19,7 +19,10 @@ defaults:
   comment: "managed by beacons"  # applied to all records unless overridden per-record or per-upstream
 
 http:
-  addr: ":9090"  # expose /healthz and /metrics; omit or leave empty to disable
+  addr: ":9090"       # expose /healthz and /metrics; omit or leave empty to disable
+  read_timeout: 5     # read timeout in seconds; 0 or omit to disable
+  idle_timeout: 30    # idle timeout in seconds; 0 or omit to disable
+  shutdown_timeout: 5 # server shutdown timeout in seconds, must be larger than 0
 
 store:
   type: file   # "memory" (default) or "file"

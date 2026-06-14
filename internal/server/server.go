@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/16bitowl/beacons/internal/registry"
 	"github.com/prometheus/client_golang/prometheus"
@@ -36,8 +37,12 @@ func New(addr string, store registry.Store, gatherer prometheus.Gatherer) *Serve
 
 // Run starts the HTTP server and blocks until ctx is cancelled or a listen
 // error occurs.
-func (s *Server) Run(ctx context.Context) error {
-	srv := &http.Server{Handler: s.handler}
+func (s *Server) Run(ctx context.Context, readTimeout, idleTimeout, shutdownTimeout int) error {
+	srv := &http.Server{
+		Handler:     s.handler,
+		ReadTimeout: time.Duration(readTimeout) * time.Second,
+		IdleTimeout: time.Duration(idleTimeout) * time.Second,
+	}
 
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
@@ -48,7 +53,9 @@ func (s *Server) Run(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
-		_ = srv.Shutdown(context.Background()) //nolint:contextcheck
+		shutCtx, cancel := context.WithTimeout(context.Background(), time.Duration(shutdownTimeout)*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutCtx)
 	}()
 
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
