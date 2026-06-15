@@ -47,17 +47,39 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        with:
+          images: |
+            ${{ env.GHCR_IMAGE }}
+            ${{ env.DOCKERHUB_IMAGE }}
+
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           platforms: ${{ matrix.platform }}
-          push: true
-          tags: |
-            ${{ env.GHCR_IMAGE }}:${{ github.sha }}-${{ matrix.suffix }}
-            ${{ env.DOCKERHUB_IMAGE }}:${{ github.sha }}-${{ matrix.suffix }}
+          push: false
+          outputs: 'type=image,"name=${{ env.GHCR_IMAGE }},${{ env.DOCKERHUB_IMAGE }}",push-by-digest=true,name-canonical=true,push=true'
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.suffix }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
 
   merge:
     name: Merge manifest
@@ -68,6 +90,13 @@ jobs:
       packages: write
 
     steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
@@ -97,17 +126,17 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Create and push manifest
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
-          GHCR_TAGS=$(jq -cr '.tags | map(select(startswith("ghcr.io")) | "-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          DOCKERHUB_TAGS=$(jq -cr '.tags | map(select(startswith("16bitowl")) | "-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          GHCR_TAGS=$(printf '%s\n' "$TAGS" | grep '^ghcr\.io' | sed 's/^/-t /' | tr '\n' ' ')
+          DOCKERHUB_TAGS=$(printf '%s\n' "$TAGS" | grep -v '^ghcr\.io' | grep -v '^$' | sed 's/^/-t /' | tr '\n' ' ')
 
           docker buildx imagetools create $GHCR_TAGS \
-            ${{ env.GHCR_IMAGE }}:${{ github.sha }}-amd64 \
-            ${{ env.GHCR_IMAGE }}:${{ github.sha }}-arm64
+            $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' $(ls /tmp/digests))
 
           docker buildx imagetools create $DOCKERHUB_TAGS \
-            ${{ env.DOCKERHUB_IMAGE }}:${{ github.sha }}-amd64 \
-            ${{ env.DOCKERHUB_IMAGE }}:${{ github.sha }}-arm64
+            $(printf '${{ env.DOCKERHUB_IMAGE }}@sha256:%s ' $(ls /tmp/digests))
 
       - name: Inspect image
         run: docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:${{ steps.meta.outputs.version }}
