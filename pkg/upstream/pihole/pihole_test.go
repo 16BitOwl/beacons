@@ -1,6 +1,10 @@
 package pihole
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -126,5 +130,135 @@ func TestSessionValid_ZeroTime_ReturnsFalse(t *testing.T) {
 	s := session{sid: "tok", expiresAt: time.Time{}}
 	if s.valid() {
 		t.Error("zero expiry time should not be valid")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// containsEntry
+// ---------------------------------------------------------------------------
+
+func TestContainsEntry_Present_ReturnsTrue(t *testing.T) {
+	entries := []string{"a", "b", "c"}
+	if !containsEntry(entries, "b") {
+		t.Error("expected true for present entry")
+	}
+}
+
+func TestContainsEntry_Absent_ReturnsFalse(t *testing.T) {
+	entries := []string{"a", "b", "c"}
+	if containsEntry(entries, "d") {
+		t.Error("expected false for absent entry")
+	}
+}
+
+func TestContainsEntry_EmptySlice_ReturnsFalse(t *testing.T) {
+	if containsEntry(nil, "x") {
+		t.Error("expected false for nil slice")
+	}
+}
+
+func TestContainsEntry_PartialMatch_ReturnsFalse(t *testing.T) {
+	// "web,target" must not match "web,target,300" — exact match only.
+	if containsEntry([]string{"web,target,300"}, "web,target") {
+		t.Error("expected false: partial prefix should not match")
+	}
+}
+
+func TestContainsEntry_FirstEntry_ReturnsTrue(t *testing.T) {
+	if !containsEntry([]string{"first", "second"}, "first") {
+		t.Error("expected true for first entry")
+	}
+}
+
+func TestContainsEntry_LastEntry_ReturnsTrue(t *testing.T) {
+	if !containsEntry([]string{"first", "second", "last"}, "last") {
+		t.Error("expected true for last entry")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 401 retry — get and patch
+// ---------------------------------------------------------------------------
+
+// authServerHandler is a reusable HTTP handler that:
+//   - POST /api/auth: always returns a valid session
+//   - other paths: behaviour is delegated to the provided handler
+func newRetryServer(t *testing.T, inner http.Handler) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth" {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"session":{"valid":true,"sid":"tok","validity":1800}}`)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	}))
+}
+
+func TestGet_RetriesOn401(t *testing.T) {
+	hostsCount := 0
+	srv := newRetryServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hostsCount++
+		if hostsCount == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"config":{"dns":{"hosts":[]}}}`)
+	}))
+	defer srv.Close()
+
+	u := New(Options{Name: "test", BaseURL: srv.URL, Password: "pw"})
+	if _, err := u.getHosts(context.Background()); err != nil {
+		t.Fatalf("getHosts: %v", err)
+	}
+	if hostsCount != 2 {
+		t.Errorf("host GET calls = %d, want 2 (one 401 + one retry)", hostsCount)
+	}
+}
+
+func TestGet_PersistentUnauthorized_ReturnsError(t *testing.T) {
+	srv := newRetryServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	u := New(Options{Name: "test", BaseURL: srv.URL, Password: "pw"})
+	_, err := u.getHosts(context.Background())
+	if err == nil {
+		t.Fatal("expected error after persistent 401, got nil")
+	}
+}
+
+func TestPatch_RetriesOn401(t *testing.T) {
+	patchCount := 0
+	srv := newRetryServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		patchCount++
+		if patchCount == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	u := New(Options{Name: "test", BaseURL: srv.URL, Password: "pw"})
+	if err := u.patch(context.Background(), map[string]any{"key": "val"}); err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	if patchCount != 2 {
+		t.Errorf("PATCH calls = %d, want 2 (one 401 + one retry)", patchCount)
+	}
+}
+
+func TestPatch_PersistentUnauthorized_ReturnsError(t *testing.T) {
+	srv := newRetryServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	u := New(Options{Name: "test", BaseURL: srv.URL, Password: "pw"})
+	if err := u.patch(context.Background(), map[string]any{"key": "val"}); err == nil {
+		t.Fatal("expected error after persistent 401, got nil")
 	}
 }

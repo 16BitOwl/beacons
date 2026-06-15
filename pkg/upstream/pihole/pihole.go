@@ -106,9 +106,10 @@ func (u *Upstream) patchHosts(ctx context.Context, r model.Record, remove bool) 
 	}
 
 	entry := r.Value + " " + r.Name
-	updated := toggleEntry(current, entry, remove)
-	if len(updated) == len(current) && !remove {
-		slog.Debug("pihole host entry already present, skipping", "upstream", u.name, "entry", entry)
+	if !remove && containsEntry(current, entry) {
+		slog.Debug("pihole host entry already present, skipping",
+			"upstream", u.name,
+			"entry", entry)
 		return nil
 	}
 
@@ -116,10 +117,12 @@ func (u *Upstream) patchHosts(ctx context.Context, r model.Record, remove bool) 
 	if remove {
 		action = "removing"
 	}
-	slog.Debug("pihole "+action+" host entry", "upstream", u.name, "entry", entry)
+	slog.Debug("pihole "+action+" host entry",
+		"upstream", u.name,
+		"entry", entry)
 	return u.patch(ctx, map[string]any{
 		"config": map[string]any{
-			"dns": map[string]any{"hosts": updated},
+			"dns": map[string]any{"hosts": toggleEntry(current, entry, remove)},
 		},
 	})
 }
@@ -143,8 +146,7 @@ func (u *Upstream) patchCNAME(ctx context.Context, r model.Record, remove bool) 
 	if r.TTL > 0 {
 		entry = fmt.Sprintf("%s,%d", entry, r.TTL)
 	}
-	updated := toggleEntry(current, entry, remove)
-	if len(updated) == len(current) && !remove {
+	if !remove && containsEntry(current, entry) {
 		slog.Debug("pihole cname entry already present, skipping",
 			"upstream", u.name,
 			"entry", entry)
@@ -160,7 +162,7 @@ func (u *Upstream) patchCNAME(ctx context.Context, r model.Record, remove bool) 
 		"entry", entry)
 	return u.patch(ctx, map[string]any{
 		"config": map[string]any{
-			"dns": map[string]any{"cnameRecords": updated},
+			"dns": map[string]any{"cnameRecords": toggleEntry(current, entry, remove)},
 		},
 	})
 }
@@ -209,6 +211,16 @@ func toggleEntry(entries []string, entry string, remove bool) []string {
 	return out
 }
 
+// containsEntry reports whether entry is present in entries (exact match).
+func containsEntry(entries []string, entry string) bool {
+	for _, e := range entries {
+		if e == entry {
+			return true
+		}
+	}
+	return false
+}
+
 // ensureSession obtains or reuses a valid session token.
 func (u *Upstream) ensureSession(ctx context.Context) (string, error) {
 	u.mu.Lock()
@@ -253,64 +265,99 @@ func (u *Upstream) ensureSession(ctx context.Context) (string, error) {
 	return u.session.sid, nil
 }
 
+// invalidateSession clears the cached session so the next ensureSession call
+// will re-authenticate. Call this when a request returns HTTP 401.
+func (u *Upstream) invalidateSession() {
+	u.mu.Lock()
+	u.session = session{}
+	u.mu.Unlock()
+}
+
 // get performs an authenticated GET and decodes the JSON response into dst.
+// On HTTP 401 it invalidates the session and retries once.
 func (u *Upstream) get(ctx context.Context, path string, dst any) error {
+	execute := func(sid string) (int, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.baseURL+path, nil)
+		if err != nil {
+			return 0, err
+		}
+		if sid != "" {
+			req.Header.Set("X-FTL-SID", sid)
+		}
+		resp, err := u.client.Do(req)
+		if err != nil {
+			return 0, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return resp.StatusCode, fmt.Errorf("pihole: GET %s returned %d", path, resp.StatusCode)
+		}
+		return resp.StatusCode, json.NewDecoder(resp.Body).Decode(dst)
+	}
+
 	sid, err := u.ensureSession(ctx)
 	if err != nil {
 		return err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.baseURL+path, nil)
-	if err != nil {
-		return err
+	status, err := execute(sid)
+	if err != nil && status == http.StatusUnauthorized {
+		slog.Debug("pihole session expired mid-request, re-authenticating",
+			"upstream", u.name)
+		u.invalidateSession()
+		if sid, err = u.ensureSession(ctx); err != nil {
+			return err
+		}
+		_, err = execute(sid)
 	}
-	if sid != "" {
-		req.Header.Set("X-FTL-SID", sid)
-	}
-
-	resp, err := u.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("pihole: GET %s returned %d", path, resp.StatusCode)
-	}
-	return json.NewDecoder(resp.Body).Decode(dst)
+	return err
 }
 
 // patch performs an authenticated PATCH with a JSON body.
+// On HTTP 401 it invalidates the session and retries once.
 func (u *Upstream) patch(ctx context.Context, payload any) error {
-	sid, err := u.ensureSession(ctx)
-	if err != nil {
-		return err
-	}
-
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, u.baseURL+"/api/config", bytes.NewReader(body))
+	execute := func(sid string) (int, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPatch, u.baseURL+"/api/config", bytes.NewReader(body))
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if sid != "" {
+			req.Header.Set("X-FTL-SID", sid)
+		}
+		resp, err := u.client.Do(req)
+		if err != nil {
+			return 0, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized {
+			return resp.StatusCode, fmt.Errorf("pihole: PATCH /api/config returned %d", resp.StatusCode)
+		}
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+			var errBody map[string]any
+			_ = json.NewDecoder(resp.Body).Decode(&errBody)
+			return resp.StatusCode, fmt.Errorf("pihole: PATCH /api/config returned %d: %v", resp.StatusCode, errBody)
+		}
+		return resp.StatusCode, nil
+	}
+
+	sid, err := u.ensureSession(ctx)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if sid != "" {
-		req.Header.Set("X-FTL-SID", sid)
+	status, err := execute(sid)
+	if err != nil && status == http.StatusUnauthorized {
+		slog.Debug("pihole session expired mid-request, re-authenticating",
+			"upstream", u.name)
+		u.invalidateSession()
+		if sid, err = u.ensureSession(ctx); err != nil {
+			return err
+		}
+		_, err = execute(sid)
 	}
-
-	resp, err := u.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		var errBody map[string]any
-		_ = json.NewDecoder(resp.Body).Decode(&errBody)
-		return fmt.Errorf("pihole: PATCH /api/config returned %d: %v", resp.StatusCode, errBody)
-	}
-	return nil
+	return err
 }
