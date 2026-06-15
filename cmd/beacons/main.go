@@ -24,6 +24,7 @@ import (
 	"github.com/16bitowl/beacons/pkg/upstream"
 	upstreamcloudflare "github.com/16bitowl/beacons/pkg/upstream/cloudflare"
 	upstreampihole "github.com/16bitowl/beacons/pkg/upstream/pihole"
+	"github.com/16bitowl/beacons/pkg/upstream/transport"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -193,6 +194,11 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 			Name:     name,
 			APIToken: cfg.APIToken,
 			ZoneID:   cfg.ZoneID,
+			RetryOptions: transport.RetryOptions{
+				MaxAttempts: cfg.HTTP.RetryMaxAttempts,
+				BaseDelay:   time.Duration(cfg.HTTP.RetryBaseDelayMs) * time.Millisecond,
+				MaxDelay:    time.Duration(cfg.HTTP.RetryMaxDelayMs) * time.Millisecond,
+			},
 		})
 	case "pihole":
 		return upstreampihole.New(upstreampihole.Options{

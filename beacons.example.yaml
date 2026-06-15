@@ -39,8 +39,8 @@ sync:
   retry_interval: 10  # retry failed records in seconds; 0 or omit to disable
   debounce_ms: 500    # collapse rapid container events after x ms of quiet; 0 to disable
   use_events: true    # also watch Docker events in real-time
-  dry_run: false      # set to true (or BEACONS_DRY_RUN=true) to log instead of apply
-  strict_env: false   # set to true (or BEACONS_STRICT_ENV=true) to fail on missing env vars
+  dry_run: false      # set to true to log instead of apply
+  strict_env: false   # set to true to fail on missing env vars
 
 # Sources define where DNS records come from. Each entry is a named instance —
 # the name is arbitrary but must be unique. You can define multiple sources of
@@ -64,11 +64,19 @@ upstreams:
     type: cloudflare
     api_token: ${CF_API_TOKEN}
     zone_id: ${CF_ZONE_A_ID}
+    http:
+      retry_max_attempts: 3
+      retry_base_delay_ms: 500
+      retry_max_delay_ms: 30000
 
   cf-zone-b:
     type: cloudflare
     api_token: ${CF_API_TOKEN}
     zone_id: ${CF_ZONE_B_ID}
+    http:
+      retry_max_attempts: 5
+      retry_base_delay_ms: 1000
+      retry_max_delay_ms: 60000
 
   pihole-home:
     type: pihole

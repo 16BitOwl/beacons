@@ -58,6 +58,14 @@ type Record struct {
 	SyncError string       `json:"sync_error,omitempty"`
 }
 
+// UpstreamHTTPConfig holds HTTP client tuning for an upstream adapter.
+// Zero values fall back to the transport defaults
+type UpstreamHTTPConfig struct {
+	RetryMaxAttempts int `yaml:"retry_max_attempts"  validate:"min=0"`
+	RetryBaseDelayMs int `yaml:"retry_base_delay_ms" validate:"min=0"`
+	RetryMaxDelayMs  int `yaml:"retry_max_delay_ms"  validate:"min=0"`
+}
+
 // UpstreamConfig holds the configuration for a named upstream adapter instance.
 type UpstreamConfig struct {
 	Type string `yaml:"type" validate:"required,oneof=cloudflare pihole"`
@@ -69,6 +77,9 @@ type UpstreamConfig struct {
 	// PiHole
 	URL      string `yaml:"url"      validate:"required_if=Type pihole,omitempty,url"`
 	Password string `yaml:"password"`
+
+	// HTTP contains HTTP client tuning shared across upstream types.
+	HTTP UpstreamHTTPConfig `yaml:"http"`
 }
 
 // SourceConfig holds the configuration for a named source adapter instance.

@@ -1,44 +1,62 @@
 package cloudflare
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/16bitowl/beacons/internal/model"
-	"github.com/cloudflare/cloudflare-go"
+	"github.com/16bitowl/beacons/pkg/upstream/transport"
 )
+
+const apiBase = "https://api.cloudflare.com/client/v4"
+
+// errAlreadyExists is the Cloudflare API error code for a duplicate record.
+const errAlreadyExists = 81058
 
 // Options configures a Cloudflare upstream adapter.
 type Options struct {
-	Name     string
-	APIToken string
-	ZoneID   string
+	Name         string
+	APIToken     string
+	ZoneID       string
+	RetryOptions transport.RetryOptions // zero value uses defaults
 }
 
 // Upstream is the Cloudflare upstream adapter.
 type Upstream struct {
 	name     string
-	api      *cloudflare.API
-	zoneID   string
+	client   *cfClient
 	zoneName string // e.g. "example.com", fetched from Cloudflare on init
 }
 
 func New(ctx context.Context, opts Options) (*Upstream, error) {
-	api, err := cloudflare.NewWithAPIToken(opts.APIToken)
-	if err != nil {
-		return nil, err
+	c := &cfClient{
+		http: &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: transport.Chain(nil,
+				transport.Retry(opts.RetryOptions),
+				transport.Bearer(opts.APIToken),
+			),
+		},
+		zoneID:  opts.ZoneID,
+		baseURL: apiBase,
 	}
-	zone, err := api.ZoneDetails(ctx, opts.ZoneID)
+	zone, err := c.getZone(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cloudflare fetch zone details: %w", err)
 	}
 	slog.Debug("cloudflare upstream initialised",
 		"upstream", opts.Name,
 		"zone", zone.Name)
-	return &Upstream{name: opts.Name, api: api, zoneID: opts.ZoneID, zoneName: zone.Name}, nil
+	return &Upstream{name: opts.Name, client: c, zoneName: zone.Name}, nil
 }
 
 // fqdn returns name as a fully qualified domain name within the zone.
@@ -62,13 +80,8 @@ func (u *Upstream) Upsert(ctx context.Context, r model.Record) error {
 	}
 
 	fqdn := u.fqdn(r.Name)
-	rc := cloudflare.ZoneIdentifier(u.zoneID)
 
-	// Check if a record with this name and type already exists.
-	existing, _, err := u.api.ListDNSRecords(ctx, rc, cloudflare.ListDNSRecordsParams{
-		Type: string(r.Type),
-		Name: fqdn,
-	})
+	existing, err := u.client.listDNSRecords(ctx, string(r.Type), fqdn, "")
 	if err != nil {
 		return fmt.Errorf("cloudflare list records: %w", err)
 	}
@@ -81,32 +94,7 @@ func (u *Upstream) Upsert(ctx context.Context, r model.Record) error {
 			"count", len(existing))
 	}
 
-	updateParams := cloudflare.UpdateDNSRecordParams{
-		Type:    string(r.Type),
-		Name:    fqdn,
-		Content: r.Value,
-		TTL:     r.TTL,
-		Comment: &r.Comment,
-	}
-	if r.Priority > 0 {
-		p := uint16(r.Priority)
-		updateParams.Priority = &p
-	}
-
-	if len(existing) > 0 {
-		updateParams.ID = existing[0].ID
-		slog.Debug("cloudflare updating existing record",
-			"upstream", u.name,
-			"name", fqdn,
-			"type", r.Type,
-			"id", existing[0].ID)
-		if _, err = u.api.UpdateDNSRecord(ctx, rc, updateParams); err != nil {
-			return fmt.Errorf("cloudflare update record: %w", err)
-		}
-		return nil
-	}
-
-	createParams := cloudflare.CreateDNSRecordParams{
+	req := dnsRecordRequest{
 		Type:    string(r.Type),
 		Name:    fqdn,
 		Content: r.Value,
@@ -115,27 +103,35 @@ func (u *Upstream) Upsert(ctx context.Context, r model.Record) error {
 	}
 	if r.Priority > 0 {
 		p := uint16(r.Priority)
-		createParams.Priority = &p
+		req.Priority = &p
+	}
+
+	if len(existing) > 0 {
+		slog.Debug("cloudflare updating existing record",
+			"upstream", u.name,
+			"name", fqdn,
+			"type", r.Type,
+			"id", existing[0].ID)
+		if _, err = u.client.updateDNSRecord(ctx, existing[0].ID, req); err != nil {
+			return fmt.Errorf("cloudflare update record: %w", err)
+		}
+		return nil
 	}
 
 	slog.Debug("cloudflare creating new record",
 		"upstream", u.name,
 		"name", fqdn,
 		"type", r.Type)
-	if _, err = u.api.CreateDNSRecord(ctx, rc, createParams); err != nil {
+	if _, err = u.client.createDNSRecord(ctx, req); err != nil {
 		// 81058: "An identical record already exists." — race between our list
 		// check and the create. The desired state is already present.
-		var cfErr *cloudflare.RequestError
-		if errors.As(err, &cfErr) {
-			for _, code := range cfErr.ErrorCodes() {
-				if code == 81058 {
-					slog.Debug("cloudflare record already exists, skipping create",
-						"upstream", u.name,
-						"name", fqdn,
-						"type", r.Type)
-					return nil
-				}
-			}
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.HasCode(errAlreadyExists) {
+			slog.Debug("cloudflare record already exists, skipping create",
+				"upstream", u.name,
+				"name", fqdn,
+				"type", r.Type)
+			return nil
 		}
 		return fmt.Errorf("cloudflare create record: %w", err)
 	}
@@ -144,15 +140,10 @@ func (u *Upstream) Upsert(ctx context.Context, r model.Record) error {
 
 func (u *Upstream) Delete(ctx context.Context, r model.Record) error {
 	fqdn := u.fqdn(r.Name)
-	rc := cloudflare.ZoneIdentifier(u.zoneID)
 
-	// Filter by content (value) so we only delete the record Beacons owns,
+	// Filter by content so we only delete the record Beacons owns,
 	// leaving any manually-created records with the same name+type untouched.
-	existing, _, err := u.api.ListDNSRecords(ctx, rc, cloudflare.ListDNSRecordsParams{
-		Type:    string(r.Type),
-		Name:    fqdn,
-		Content: r.Value,
-	})
+	existing, err := u.client.listDNSRecords(ctx, string(r.Type), fqdn, r.Value)
 	if err != nil {
 		return fmt.Errorf("cloudflare list records: %w", err)
 	}
@@ -170,9 +161,213 @@ func (u *Upstream) Delete(ctx context.Context, r model.Record) error {
 			"name", fqdn,
 			"type", r.Type,
 			"id", rec.ID)
-		if err := u.api.DeleteDNSRecord(ctx, rc, rec.ID); err != nil {
+		if err := u.client.deleteDNSRecord(ctx, rec.ID); err != nil {
 			return fmt.Errorf("cloudflare delete record: %w", err)
 		}
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Cloudflare API types
+// ---------------------------------------------------------------------------
+
+// apiError is a single error entry returned by the Cloudflare API.
+type apiError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// resultInfo is the pagination metadata returned by list endpoints.
+type resultInfo struct {
+	Page       int `json:"page"`
+	PerPage    int `json:"per_page"`
+	TotalPages int `json:"total_pages"`
+}
+
+// apiResponse is the common Cloudflare API response envelope.
+type apiResponse struct {
+	Success    bool            `json:"success"`
+	Errors     []apiError      `json:"errors"`
+	Result     json.RawMessage `json:"result"`
+	ResultInfo resultInfo      `json:"result_info"`
+}
+
+// zone holds the fields we need from a Zone Details response.
+type zone struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// dnsRecord is the Cloudflare representation of a DNS record.
+type dnsRecord struct {
+	ID      string  `json:"id"`
+	Type    string  `json:"type"`
+	Name    string  `json:"name"`
+	Content string  `json:"content"`
+	TTL     int     `json:"ttl"`
+	Comment string  `json:"comment,omitempty"`
+}
+
+// dnsRecordRequest is the body for create and update calls.
+type dnsRecordRequest struct {
+	Type     string  `json:"type"`
+	Name     string  `json:"name"`
+	Content  string  `json:"content"`
+	TTL      int     `json:"ttl"`
+	Comment  string  `json:"comment,omitempty"`
+	Priority *uint16 `json:"priority,omitempty"`
+}
+
+// APIError is returned when the Cloudflare API responds with one or more errors.
+type APIError struct {
+	errors []apiError
+}
+
+func (e *APIError) Error() string {
+	msgs := make([]string, len(e.errors))
+	for i, ae := range e.errors {
+		msgs[i] = fmt.Sprintf("%d: %s", ae.Code, ae.Message)
+	}
+	return "cloudflare api error: " + strings.Join(msgs, "; ")
+}
+
+// HasCode reports whether any of the API errors carries the given error code.
+func (e *APIError) HasCode(code int) bool {
+	for _, ae := range e.errors {
+		if ae.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------
+// HTTP client
+// ---------------------------------------------------------------------------
+
+type cfClient struct {
+	http    *http.Client
+	zoneID  string
+	baseURL string
+}
+
+// doRaw executes an HTTP request against the Cloudflare API and returns the
+// decoded response envelope. The caller is responsible for unmarshalling Result.
+func (c *cfClient) doRaw(ctx context.Context, method, path string, body any) (*apiResponse, error) {
+	var reqBody *bytes.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reqBody = bytes.NewReader(b)
+	}
+
+	var req *http.Request
+	var err error
+	if reqBody != nil {
+		req, err = http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
+	} else {
+		req, err = http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var env apiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, fmt.Errorf("cloudflare: decode response: %w", err)
+	}
+	if !env.Success {
+		return nil, &APIError{errors: env.Errors}
+	}
+	return &env, nil
+}
+
+// do executes an HTTP request against the Cloudflare API, decodes the response
+// envelope, and unmarshals the result into out (may be nil).
+func (c *cfClient) do(ctx context.Context, method, path string, body any, out any) error {
+	env, err := c.doRaw(ctx, method, path, body)
+	if err != nil {
+		return err
+	}
+	if out != nil && len(env.Result) > 0 {
+		return json.Unmarshal(env.Result, out)
+	}
+	return nil
+}
+
+func (c *cfClient) getZone(ctx context.Context) (*zone, error) {
+	var z zone
+	if err := c.do(ctx, http.MethodGet, "/zones/"+c.zoneID, nil, &z); err != nil {
+		return nil, err
+	}
+	return &z, nil
+}
+
+// listDNSRecords lists all records filtered by type and name, fetching every
+// page until the result set is exhausted.
+// content is optional; pass an empty string to omit the filter.
+func (c *cfClient) listDNSRecords(ctx context.Context, recordType, name, content string) ([]dnsRecord, error) {
+	const perPage = 100
+
+	var all []dnsRecord
+	for page := 1; ; page++ {
+		params := url.Values{}
+		params.Set("type", recordType)
+		params.Set("name", name)
+		if content != "" {
+			params.Set("content", content)
+		}
+		params.Set("page", strconv.Itoa(page))
+		params.Set("per_page", strconv.Itoa(perPage))
+
+		env, err := c.doRaw(ctx, http.MethodGet, "/zones/"+c.zoneID+"/dns_records?"+params.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+
+		var pageRecords []dnsRecord
+		if len(env.Result) > 0 {
+			if err := json.Unmarshal(env.Result, &pageRecords); err != nil {
+				return nil, fmt.Errorf("cloudflare: decode dns records: %w", err)
+			}
+		}
+		all = append(all, pageRecords...)
+
+		if page >= env.ResultInfo.TotalPages || len(pageRecords) == 0 {
+			break
+		}
+	}
+	return all, nil
+}
+
+func (c *cfClient) createDNSRecord(ctx context.Context, r dnsRecordRequest) (*dnsRecord, error) {
+	var rec dnsRecord
+	if err := c.do(ctx, http.MethodPost, "/zones/"+c.zoneID+"/dns_records", r, &rec); err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+func (c *cfClient) updateDNSRecord(ctx context.Context, id string, r dnsRecordRequest) (*dnsRecord, error) {
+	var rec dnsRecord
+	if err := c.do(ctx, http.MethodPut, "/zones/"+c.zoneID+"/dns_records/"+id, r, &rec); err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+func (c *cfClient) deleteDNSRecord(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodDelete, "/zones/"+c.zoneID+"/dns_records/"+id, nil, nil)
 }
