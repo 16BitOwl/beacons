@@ -238,6 +238,70 @@ func TestParseLabels_LabelsWithoutDNSPrefixIgnored(t *testing.T) {
 	}
 }
 
+func TestParseLabels_InvalidBaseTTLFallsBackToDefault(t *testing.T) {
+	labels := map[string]string{
+		"dns.enable":       "true",
+		"dns.ttl":          "notanumber",
+		"dns.web.cf.type":  "A",
+		"dns.web.cf.name":  "web.example.com",
+		"dns.web.cf.value": "1.2.3.4",
+	}
+	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{TTL: 300}, false)
+	if err != nil {
+		t.Fatalf("parseLabels: %v", err)
+	}
+	if records[0].TTL != 300 {
+		t.Errorf("TTL = %d, want 300 (invalid dns.ttl should fall back to default)", records[0].TTL)
+	}
+}
+
+func TestParseLabels_InvalidPerRecordTTLFallsBackToBase(t *testing.T) {
+	labels := map[string]string{
+		"dns.enable":       "true",
+		"dns.web.cf.type":  "A",
+		"dns.web.cf.name":  "web.example.com",
+		"dns.web.cf.value": "1.2.3.4",
+		"dns.web.cf.ttl":   "notanumber",
+	}
+	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{TTL: 300}, false)
+	if err != nil {
+		t.Fatalf("parseLabels: %v", err)
+	}
+	if records[0].TTL != 300 {
+		t.Errorf("TTL = %d, want 300 (invalid per-record ttl should fall back to base)", records[0].TTL)
+	}
+}
+
+func TestParseLabels_InvalidPriorityFallsBackToZero(t *testing.T) {
+	labels := map[string]string{
+		"dns.enable":           "true",
+		"dns.mail.cf.type":     "MX",
+		"dns.mail.cf.name":     "example.com",
+		"dns.mail.cf.value":    "mail.example.com",
+		"dns.mail.cf.priority": "notanumber",
+	}
+	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
+	if err != nil {
+		t.Fatalf("parseLabels: %v", err)
+	}
+	if records[0].Priority != 0 {
+		t.Errorf("Priority = %d, want 0 (invalid priority should fall back to zero)", records[0].Priority)
+	}
+}
+
+func TestParseLabels_EnabledButNoRecordLabels(t *testing.T) {
+	labels := map[string]string{
+		"dns.enable": "true",
+	}
+	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
+	if err != nil {
+		t.Fatalf("parseLabels: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("expected 0 records, got %d", len(records))
+	}
+}
+
 func TestParseLabels_MalformedLabelIgnored(t *testing.T) {
 	// Labels with fewer than 3 parts after the "dns." prefix are silently ignored.
 	labels := map[string]string{
