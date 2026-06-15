@@ -305,3 +305,51 @@ func mapKeys[V any](m map[string]V) []string {
 
 // Ensure model is used (it's referenced via Config fields).
 var _ model.BaseRecord
+
+// ---------------------------------------------------------------------------
+// setScalar: invalid env var values leave the field at its default
+// ---------------------------------------------------------------------------
+
+// TestEnvInvalidInt_FieldLeftAtDefault verifies that a non-integer value for an
+// int config field is ignored, leaving the field at its default value.
+func TestEnvInvalidInt_FieldLeftAtDefault(t *testing.T) {
+	t.Setenv("BEACONS_SYNC_POLL_INTERVAL", "not-a-number")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	// Default poll interval is 300 (defined in defaults()).
+	if cfg.Sync.PollInterval != 300 {
+		t.Errorf("PollInterval = %d, want 300 (invalid env value must not override)", cfg.Sync.PollInterval)
+	}
+}
+
+// TestEnvInvalidInt_SiblingFieldsUnaffected verifies that one invalid env var
+// does not prevent other valid env vars from being applied.
+func TestEnvInvalidInt_SiblingFieldsUnaffected(t *testing.T) {
+	t.Setenv("BEACONS_SYNC_POLL_INTERVAL", "abc")
+	t.Setenv("BEACONS_DEFAULTS_TTL", "600")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Defaults.TTL != 600 {
+		t.Errorf("Defaults.TTL = %d, want 600 (valid env var must still apply)", cfg.Defaults.TTL)
+	}
+	if cfg.Sync.PollInterval != 300 {
+		t.Errorf("PollInterval = %d, want 300 (invalid env var must not change default)", cfg.Sync.PollInterval)
+	}
+}
+
+// TestEnvValidInt_FieldUpdated confirms the happy path still works after the
+// setScalar signature change.
+func TestEnvValidInt_FieldUpdated(t *testing.T) {
+	t.Setenv("BEACONS_SYNC_POLL_INTERVAL", "120")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Sync.PollInterval != 120 {
+		t.Errorf("PollInterval = %d, want 120", cfg.Sync.PollInterval)
+	}
+}

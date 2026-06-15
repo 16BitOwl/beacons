@@ -66,7 +66,7 @@ func walkStruct(v reflect.Value, path string, env map[string]string) {
 		default:
 			if val, ok := env[fieldPath]; ok && val != "" {
 				prev := fv.Interface()
-				setScalar(fv, val)
+				setScalar(fv, val, fieldPath)
 				if reflect.DeepEqual(prev, reflect.Zero(fv.Type()).Interface()) {
 					slog.Debug("config set from env", "key", fieldPath, "value", fv.Interface())
 				} else if !reflect.DeepEqual(prev, fv.Interface()) {
@@ -137,23 +137,38 @@ func resolveMapKey(mv reflect.Value, token string) string {
 	return norm
 }
 
-func setScalar(fv reflect.Value, val string) {
+func setScalar(fv reflect.Value, val, key string) {
 	switch fv.Kind() {
 	case reflect.String:
 		fv.SetString(val)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if n, err := strconv.ParseInt(val, 10, 64); err == nil {
 			fv.SetInt(n)
+		} else {
+			slog.Warn("config env var has unparseable value, ignoring",
+				"key", key,
+				"value", val,
+				"err", err)
 		}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		if n, err := strconv.ParseUint(val, 10, 64); err == nil {
 			fv.SetUint(n)
+		} else {
+			slog.Warn("config env var has unparseable value, ignoring",
+				"key", key,
+				"value", val,
+				"err", err)
 		}
 	case reflect.Bool:
 		fv.SetBool(val == "true" || val == "1")
 	case reflect.Float32, reflect.Float64:
 		if n, err := strconv.ParseFloat(val, 64); err == nil {
 			fv.SetFloat(n)
+		} else {
+			slog.Warn("config env var has unparseable value, ignoring",
+				"key", key,
+				"value", val,
+				"err", err)
 		}
 	}
 }
