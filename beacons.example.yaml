@@ -64,11 +64,19 @@ upstreams:
     type: cloudflare
     api_token: ${CF_API_TOKEN}
     zone_id: ${CF_ZONE_A_ID}
+    http:
+      retry_max_attempts: 3
+      retry_base_delay_ms: 500
+      retry_max_delay_ms: 30000
 
   cf-zone-b:
     type: cloudflare
     api_token: ${CF_API_TOKEN}
     zone_id: ${CF_ZONE_B_ID}
+    http:
+      retry_max_attempts: 5
+      retry_base_delay_ms: 1000
+      retry_max_delay_ms: 60000
 
   pihole-home:
     type: pihole
