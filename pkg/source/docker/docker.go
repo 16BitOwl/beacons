@@ -11,10 +11,8 @@ import (
 	"github.com/16bitowl/beacons/internal/model"
 	"github.com/16bitowl/beacons/internal/validate"
 	"github.com/16bitowl/beacons/pkg/source"
-	"github.com/docker/docker/api/types/container"
-	dockerevents "github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/filters"
-	dockerclient "github.com/docker/docker/client"
+	dockerevents "github.com/moby/moby/api/types/events"
+	dockerclient "github.com/moby/moby/client"
 )
 
 const labelPrefix = "dns."
@@ -43,11 +41,11 @@ type Source struct {
 
 // New creates a new Docker source adapter.
 func New(opts Options) (*Source, error) {
-	clientOpts := []dockerclient.Opt{dockerclient.WithAPIVersionNegotiation()}
+	clientOpts := []dockerclient.Opt{}
 	if opts.Host != "" {
 		clientOpts = append(clientOpts, dockerclient.WithHost(opts.Host))
 	}
-	c, err := dockerclient.NewClientWithOpts(clientOpts...)
+	c, err := dockerclient.New(clientOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -85,13 +83,12 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 		pollC = t.C
 	}
 
-	var eventC <-chan dockerevents.Message
-	var errC <-chan error
+	var eventsResult dockerclient.EventsResult
 	if s.useEvents {
 		slog.Info("docker event watching enabled",
 			"source", s.name)
-		f := filters.NewArgs(filters.Arg("type", "container"))
-		eventC, errC = s.client.Events(ctx, dockerevents.ListOptions{Filters: f})
+		f := make(dockerclient.Filters).Add("type", "container")
+		eventsResult = s.client.Events(ctx, dockerclient.EventsListOptions{Filters: f})
 	}
 
 	// debounce state: per-container pending timer and generation counter.
@@ -114,16 +111,16 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case err := <-errC:
+		case err := <-eventsResult.Err:
 			if err != nil {
 				slog.Error("docker event stream error",
 					"source", s.name,
 					"err", err)
 			}
-		case msg := <-eventC:
-			if s.debounceDelay <= 0 || msg.Action == "start" {
+		case msg := <-eventsResult.Messages:
+			if s.debounceDelay <= 0 || msg.Action == dockerevents.ActionStart {
 				// Cancel any pending stop-debounce for this container on start.
-				if msg.Action == "start" {
+				if msg.Action == dockerevents.ActionStart {
 					if p, ok := debounced[msg.Actor.ID]; ok {
 						p.timer.Stop()
 						delete(debounced, msg.Actor.ID)
@@ -165,13 +162,13 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 // every DNS record found. The syncer uses this to detect and clean up records
 // from containers that are no longer running.
 func (s *Source) poll(ctx context.Context, ch chan<- source.Event) error {
-	containers, err := s.client.ContainerList(ctx, container.ListOptions{})
+	listed, err := s.client.ContainerList(ctx, dockerclient.ContainerListOptions{})
 	if err != nil {
 		return err
 	}
 
 	var records []model.Record
-	for _, c := range containers {
+	for _, c := range listed.Items {
 		recs, err := parseLabels(s.name, c.ID, c.Labels, s.defaults, s.strictValidation)
 		if err != nil {
 			slog.Error("docker label validation failed",
@@ -193,7 +190,7 @@ func (s *Source) poll(ctx context.Context, ch chan<- source.Event) error {
 	slog.Info("docker poll complete",
 		"source", s.name,
 		"containers_with_records", uniqueSourceIDs(records),
-		"total_containers", len(containers),
+		"total_containers", len(listed.Items),
 		"total_records", len(records))
 
 	ch <- source.Event{
@@ -206,18 +203,18 @@ func (s *Source) poll(ctx context.Context, ch chan<- source.Event) error {
 
 func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch chan<- source.Event) {
 	switch msg.Action {
-	case "start":
+	case dockerevents.ActionStart:
 		slog.Info("container started, inspecting labels",
 			"source", s.name,
 			"container", shortID(msg.Actor.ID))
-		info, err := s.client.ContainerInspect(ctx, msg.Actor.ID)
+		result, err := s.client.ContainerInspect(ctx, msg.Actor.ID, dockerclient.ContainerInspectOptions{})
 		if err != nil {
 			slog.Error("docker inspect failed",
 				"id", shortID(msg.Actor.ID),
 				"err", err)
 			return
 		}
-		records, err := parseLabels(s.name, info.ID, info.Config.Labels, s.defaults, s.strictValidation)
+		records, err := parseLabels(s.name, result.Container.ID, result.Container.Config.Labels, s.defaults, s.strictValidation)
 		if err != nil {
 			slog.Error("docker label validation failed",
 				"source", s.name,
@@ -233,7 +230,7 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 			ch <- source.Event{
 				Type:       source.EventUpsert,
 				SourceName: s.name,
-				SourceID:   info.ID,
+				SourceID:   result.Container.ID,
 				Records:    records,
 			}
 		} else {
@@ -241,7 +238,7 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 				"source", s.name,
 				"container", shortID(msg.Actor.ID))
 		}
-	case "die", "stop", "kill":
+	case dockerevents.ActionDie, dockerevents.ActionStop, dockerevents.ActionKill:
 		slog.Info("container stopped, queuing delete",
 			"source", s.name,
 			"container", shortID(msg.Actor.ID),
