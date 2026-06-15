@@ -2,6 +2,23 @@
 
 Beacons watches Docker containers and static YAML files for DNS record definitions and syncs them to one or more upstream DNS providers. When a container starts or stops, its records are created or removed automatically.
 
+## Running with Docker Compose
+
+Images are available on both Docker hub (`16bitowl/beacons:<tag>`) or on Github Container Registry (`ghcr.io/16bitowl/beacons:<tag>`).
+
+Quick start:
+1. Copy `beacons.example.yaml` to `beacons.yaml` and prepare in your upstreams and config
+2. Copy `.env.example` to `.env` and fill in your API tokens/passwords
+3. Run:
+```sh
+docker compose up -d
+```
+
+> [!TIP]
+> set `dry_run: true` in `beacons.yaml` on first run to verify records are discovered correctly before anything is pushed to your DNS providers.
+
+By default in the example Docker compose the `beacons` service mounts the Docker socket, `beacons.yaml`, a static config directory, and a data volume for persistent state.
+
 ## Supported sources
 
 - **Docker** — reads records from container labels (`dns.*`)
@@ -50,14 +67,6 @@ In addition to the standard Go metrics, these application specific metrics are a
 |--------|------|-------------|
 | `beacons_sync_operations_total` | counter | Sync operations by `upstream`, `operation`, `result` |
 | `beacons_sync_duration_seconds` | histogram | Upstream call latency by `upstream`, `operation` |
-
-## Running with Docker Compose
-
-```sh
-docker compose up -d
-```
-
-The `beacons` service mounts the Docker socket, `beacons.yaml`, a static config directory, and a data volume for persistent state.
 
 ## Building
 
