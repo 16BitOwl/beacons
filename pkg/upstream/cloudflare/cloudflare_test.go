@@ -26,6 +26,21 @@ func cfOK(result any) string {
 	return string(b)
 }
 
+// cfOKPaged encodes a successful response with pagination metadata.
+func cfOKPaged(result any, page, totalPages int) string {
+	b, _ := json.Marshal(map[string]any{
+		"success": true,
+		"errors":  []any{},
+		"result":  result,
+		"result_info": map[string]any{
+			"page":        page,
+			"per_page":    100,
+			"total_pages": totalPages,
+		},
+	})
+	return string(b)
+}
+
 // cfErr encodes a failed Cloudflare API response envelope.
 func cfErr(code int, msg string) string {
 	return fmt.Sprintf(`{"success":false,"errors":[{"code":%d,"message":%q}],"result":null}`, code, msg)
@@ -338,5 +353,41 @@ func TestDelete_DeletesAllMatchingRecords(t *testing.T) {
 	}
 	if deleteCount != 2 {
 		t.Errorf("DELETE calls = %d, want 2", deleteCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Pagination
+// ---------------------------------------------------------------------------
+
+func TestListDNSRecords_Pagination_FetchesAllPages(t *testing.T) {
+	// Simulate a two-page result: page 1 returns rec1, page 2 returns rec2.
+	getCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodGet {
+			http.Error(w, "unexpected", http.StatusMethodNotAllowed)
+			return
+		}
+		getCount++
+		switch r.URL.Query().Get("page") {
+		case "1":
+			fmt.Fprint(w, cfOKPaged([]dnsRecord{{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4"}}, 1, 2))
+		default:
+			fmt.Fprint(w, cfOKPaged([]dnsRecord{{ID: "rec2", Type: "A", Name: "web.example.com", Content: "5.6.7.8"}}, 2, 2))
+		}
+	}))
+	defer srv.Close()
+
+	c := &cfClient{http: &http.Client{}, zoneID: "zone123", baseURL: srv.URL}
+	records, err := c.listDNSRecords(context.Background(), "A", "web.example.com", "")
+	if err != nil {
+		t.Fatalf("listDNSRecords: %v", err)
+	}
+	if getCount != 2 {
+		t.Errorf("GET requests = %d, want 2", getCount)
+	}
+	if len(records) != 2 {
+		t.Errorf("records returned = %d, want 2", len(records))
 	}
 }

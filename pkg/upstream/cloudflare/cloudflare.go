@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,11 +178,19 @@ type apiError struct {
 	Message string `json:"message"`
 }
 
+// resultInfo is the pagination metadata returned by list endpoints.
+type resultInfo struct {
+	Page       int `json:"page"`
+	PerPage    int `json:"per_page"`
+	TotalPages int `json:"total_pages"`
+}
+
 // apiResponse is the common Cloudflare API response envelope.
 type apiResponse struct {
-	Success bool              `json:"success"`
-	Errors  []apiError        `json:"errors"`
-	Result  json.RawMessage   `json:"result"`
+	Success    bool            `json:"success"`
+	Errors     []apiError      `json:"errors"`
+	Result     json.RawMessage `json:"result"`
+	ResultInfo resultInfo      `json:"result_info"`
 }
 
 // zone holds the fields we need from a Zone Details response.
@@ -243,14 +252,14 @@ type cfClient struct {
 	baseURL string
 }
 
-// do executes an HTTP request against the Cloudflare API, decodes the response
-// envelope, and unmarshals the result into out (may be nil).
-func (c *cfClient) do(ctx context.Context, method, path string, body any, out any) error {
+// doRaw executes an HTTP request against the Cloudflare API and returns the
+// decoded response envelope. The caller is responsible for unmarshalling Result.
+func (c *cfClient) doRaw(ctx context.Context, method, path string, body any) (*apiResponse, error) {
 	var reqBody *bytes.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		reqBody = bytes.NewReader(b)
 	}
@@ -263,7 +272,7 @@ func (c *cfClient) do(ctx context.Context, method, path string, body any, out an
 		req, err = http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -271,16 +280,26 @@ func (c *cfClient) do(ctx context.Context, method, path string, body any, out an
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	var env apiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return fmt.Errorf("cloudflare: decode response: %w", err)
+		return nil, fmt.Errorf("cloudflare: decode response: %w", err)
 	}
 	if !env.Success {
-		return &APIError{errors: env.Errors}
+		return nil, &APIError{errors: env.Errors}
+	}
+	return &env, nil
+}
+
+// do executes an HTTP request against the Cloudflare API, decodes the response
+// envelope, and unmarshals the result into out (may be nil).
+func (c *cfClient) do(ctx context.Context, method, path string, body any, out any) error {
+	env, err := c.doRaw(ctx, method, path, body)
+	if err != nil {
+		return err
 	}
 	if out != nil && len(env.Result) > 0 {
 		return json.Unmarshal(env.Result, out)
@@ -296,20 +315,41 @@ func (c *cfClient) getZone(ctx context.Context) (*zone, error) {
 	return &z, nil
 }
 
-// listDNSRecords lists records filtered by type and name.
+// listDNSRecords lists all records filtered by type and name, fetching every
+// page until the result set is exhausted.
 // content is optional; pass an empty string to omit the filter.
 func (c *cfClient) listDNSRecords(ctx context.Context, recordType, name, content string) ([]dnsRecord, error) {
-	params := url.Values{}
-	params.Set("type", recordType)
-	params.Set("name", name)
-	if content != "" {
-		params.Set("content", content)
+	const perPage = 100
+
+	var all []dnsRecord
+	for page := 1; ; page++ {
+		params := url.Values{}
+		params.Set("type", recordType)
+		params.Set("name", name)
+		if content != "" {
+			params.Set("content", content)
+		}
+		params.Set("page", strconv.Itoa(page))
+		params.Set("per_page", strconv.Itoa(perPage))
+
+		env, err := c.doRaw(ctx, http.MethodGet, "/zones/"+c.zoneID+"/dns_records?"+params.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+
+		var pageRecords []dnsRecord
+		if len(env.Result) > 0 {
+			if err := json.Unmarshal(env.Result, &pageRecords); err != nil {
+				return nil, fmt.Errorf("cloudflare: decode dns records: %w", err)
+			}
+		}
+		all = append(all, pageRecords...)
+
+		if page >= env.ResultInfo.TotalPages || len(pageRecords) == 0 {
+			break
+		}
 	}
-	var records []dnsRecord
-	if err := c.do(ctx, http.MethodGet, "/zones/"+c.zoneID+"/dns_records?"+params.Encode(), nil, &records); err != nil {
-		return nil, err
-	}
-	return records, nil
+	return all, nil
 }
 
 func (c *cfClient) createDNSRecord(ctx context.Context, r dnsRecordRequest) (*dnsRecord, error) {
