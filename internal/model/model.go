@@ -28,7 +28,7 @@ const (
 // BaseRecord holds fields common to all DNS records and shared defaults.
 type BaseRecord struct {
 	TTL      int    `yaml:"ttl"      json:"ttl"`
-	Priority int    `yaml:"priority" json:"priority"` // used by MX, SRV
+	Priority int    `yaml:"priority" json:"priority" validate:"min=0,max=65535"` // used by MX, SRV; capped to uint16 range
 	Comment  string `yaml:"comment"  json:"comment"`
 }
 

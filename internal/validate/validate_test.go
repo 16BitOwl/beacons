@@ -1083,3 +1083,59 @@ func TestSourceMapPath_ErrorIncludesMapKey(t *testing.T) {
 	ve := mustErrors(t, err)
 	assertHasErr(t, ve, "sources.static-files.glob", "required_if=Type yaml")
 }
+
+// ---------------------------------------------------------------------------
+// Model: Record — Priority range validation (#7)
+// ---------------------------------------------------------------------------
+
+func validMXRecord() *model.Record {
+	return &model.Record{
+		Type:     model.RecordTypeMX,
+		Name:     "example.com",
+		Value:    "mail.example.com",
+		Upstream: "cf",
+	}
+}
+
+func TestRecord_Priority_Zero_Valid(t *testing.T) {
+	r := validMXRecord()
+	r.Priority = 0
+	mustPass(t, validate.Struct(r))
+}
+
+func TestRecord_Priority_MaxValid_Valid(t *testing.T) {
+	r := validMXRecord()
+	r.Priority = 65535
+	mustPass(t, validate.Struct(r))
+}
+
+func TestRecord_Priority_TypicalValues_Valid(t *testing.T) {
+	for _, p := range []int{1, 10, 100, 1000, 32767} {
+		r := validMXRecord()
+		r.Priority = p
+		if err := validate.Struct(r); err != nil {
+			t.Errorf("Priority=%d: unexpected error: %v", p, err)
+		}
+	}
+}
+
+func TestRecord_Priority_ExceedsMax_Fails(t *testing.T) {
+	r := validMXRecord()
+	r.Priority = 65536
+	ve := mustErrors(t, validate.Struct(r))
+	assertHasErr(t, ve, "priority", "max=65535")
+}
+
+func TestRecord_Priority_Negative_Fails(t *testing.T) {
+	r := validMXRecord()
+	r.Priority = -1
+	ve := mustErrors(t, validate.Struct(r))
+	assertHasErr(t, ve, "priority", "min=0")
+}
+
+func TestRecord_Priority_FarAboveMax_Fails(t *testing.T) {
+	r := validMXRecord()
+	r.Priority = 1_000_000
+	ve := mustErrors(t, validate.Struct(r))
+	assertHasErr(t, ve, "priority", "max=65535")
+}
