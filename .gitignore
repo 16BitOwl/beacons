@@ -32,7 +32,11 @@ go.work.sum
 # .vscode/
 
 # Docker or runtime related
+docker-compose.dev.yaml
 data/
 
 # Local config (use beacons.example.yaml as a starting point)
 beacons.yaml
+
+# Notes
+notes/
