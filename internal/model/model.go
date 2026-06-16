@@ -69,6 +69,9 @@ type UpstreamHTTPConfig struct {
 	RetryMaxAttempts int `yaml:"retry_max_attempts"  validate:"min=0"`
 	RetryBaseDelayMs int `yaml:"retry_base_delay_ms" validate:"min=0"`
 	RetryMaxDelayMs  int `yaml:"retry_max_delay_ms"  validate:"min=0"`
+	// AuthFailureThreshold is the number of consecutive HTTP 401 responses that
+	// disable the upstream until the process is restarted. 0 uses the transport default (5).
+	AuthFailureThreshold int `yaml:"auth_failure_threshold" validate:"min=0"`
 }
 
 // UpstreamConfig holds the configuration for a named upstream adapter instance.

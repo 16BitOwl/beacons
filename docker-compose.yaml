@@ -2,7 +2,7 @@ name: beacons
 
 services:
   beacons:
-    image: 16bitowl/beacons:1
+    image: 16bitowl/beacons:0
     container_name: beacons
     restart: unless-stopped
     env_file:
