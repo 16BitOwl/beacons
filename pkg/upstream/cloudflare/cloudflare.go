@@ -24,10 +24,11 @@ const errAlreadyExists = 81058
 
 // Options configures a Cloudflare upstream adapter.
 type Options struct {
-	Name         string
-	APIToken     string
-	ZoneID       string
-	RetryOptions transport.RetryOptions // zero value uses defaults
+	Name            string
+	APIToken        string
+	ZoneID          string
+	RetryOptions    transport.RetryOptions // zero value uses defaults
+	MaxAuthFailures int                    // consecutive 401s before disabling; 0 uses transport default
 }
 
 // Upstream is the Cloudflare upstream adapter.
@@ -38,10 +39,30 @@ type Upstream struct {
 }
 
 func New(ctx context.Context, opts Options) (*Upstream, error) {
+	// Use a plain one-shot client for the startup zone validation.
+	initClient := &cfClient{
+		http: &http.Client{
+			Timeout:   15 * time.Second,
+			Transport: transport.Chain(nil, transport.Bearer(opts.APIToken)),
+		},
+		zoneID:  opts.ZoneID,
+		baseURL: apiBase,
+	}
+	zone, err := initClient.getZone(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("cloudflare fetch zone details: %w", err)
+	}
+
+	// Runtime client gets the full transport chain: circuit breaker outermost so
+	// it can short-circuit before retry even runs.
 	c := &cfClient{
 		http: &http.Client{
 			Timeout: 15 * time.Second,
 			Transport: transport.Chain(nil,
+				transport.CircuitBreaker(transport.CircuitBreakerOptions{
+					Name:            opts.Name,
+					MaxAuthFailures: opts.MaxAuthFailures,
+				}),
 				transport.Retry(opts.RetryOptions),
 				transport.Bearer(opts.APIToken),
 			),
@@ -49,10 +70,7 @@ func New(ctx context.Context, opts Options) (*Upstream, error) {
 		zoneID:  opts.ZoneID,
 		baseURL: apiBase,
 	}
-	zone, err := c.getZone(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("cloudflare fetch zone details: %w", err)
-	}
+
 	slog.Debug("cloudflare upstream initialised",
 		"upstream", opts.Name,
 		"zone", zone.Name)
@@ -201,12 +219,12 @@ type zone struct {
 
 // dnsRecord is the Cloudflare representation of a DNS record.
 type dnsRecord struct {
-	ID      string  `json:"id"`
-	Type    string  `json:"type"`
-	Name    string  `json:"name"`
-	Content string  `json:"content"`
-	TTL     int     `json:"ttl"`
-	Comment string  `json:"comment,omitempty"`
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	TTL     int    `json:"ttl"`
+	Comment string `json:"comment,omitempty"`
 }
 
 // dnsRecordRequest is the body for create and update calls.

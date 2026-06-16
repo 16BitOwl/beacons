@@ -19,6 +19,26 @@ type Upstream interface {
 	Delete(ctx context.Context, r model.Record) error
 }
 
+// Disabled is an upstream that failed to initialise. Every operation returns
+// the original init error so records are marked failed in the store rather than
+// silently dropped. The retry loop will keep attempting them; once the
+// credentials are fixed and the process is restarted the upstream initialises
+// normally and the retry loop drains any pending records.
+type Disabled struct {
+	name string
+	err  error
+}
+
+func NewDisabled(name string, err error) *Disabled {
+	return &Disabled{name: name, err: err}
+}
+
+func (d *Disabled) Name() string { return d.name }
+
+func (d *Disabled) Upsert(_ context.Context, _ model.Record) error { return d.err }
+
+func (d *Disabled) Delete(_ context.Context, _ model.Record) error { return d.err }
+
 // DryRun wraps an Upstream and logs operations instead of applying them.
 type DryRun struct {
 	wrapped Upstream

@@ -20,9 +20,10 @@ const (
 type RecordStatus string
 
 const (
-	RecordStatusPending RecordStatus = "pending"
-	RecordStatusSynced  RecordStatus = "synced"
-	RecordStatusFailed  RecordStatus = "failed"
+	RecordStatusPending       RecordStatus = "pending"
+	RecordStatusSynced        RecordStatus = "synced"
+	RecordStatusFailed        RecordStatus = "failed"
+	RecordStatusPendingDelete RecordStatus = "pending_delete"
 )
 
 // BaseRecord holds fields common to all DNS records and shared defaults.
@@ -56,6 +57,10 @@ type Record struct {
 	Status    RecordStatus `json:"status,omitempty"`
 	SyncedAt  time.Time    `json:"synced_at,omitempty"`
 	SyncError string       `json:"sync_error,omitempty"`
+
+	// Failures counts how many consecutive upstream operation attempts have failed
+	// for this record.
+	Failures int `json:"failures,omitempty"`
 }
 
 // UpstreamHTTPConfig holds HTTP client tuning for an upstream adapter.
@@ -64,6 +69,9 @@ type UpstreamHTTPConfig struct {
 	RetryMaxAttempts int `yaml:"retry_max_attempts"  validate:"min=0"`
 	RetryBaseDelayMs int `yaml:"retry_base_delay_ms" validate:"min=0"`
 	RetryMaxDelayMs  int `yaml:"retry_max_delay_ms"  validate:"min=0"`
+	// AuthFailureThreshold is the number of consecutive HTTP 401 responses that
+	// disable the upstream until the process is restarted. 0 uses the transport default (5).
+	AuthFailureThreshold int `yaml:"auth_failure_threshold" validate:"min=0"`
 }
 
 // UpstreamConfig holds the configuration for a named upstream adapter instance.

@@ -44,6 +44,13 @@ func (f *FileStore) Delete(sourceID string) error {
 	return f.flush()
 }
 
+func (f *FileStore) DeleteRecord(r model.Record) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.records, recordKey(r))
+	return f.flush()
+}
+
 func (f *FileStore) List() ([]model.Record, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()

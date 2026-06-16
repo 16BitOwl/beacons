@@ -67,10 +67,11 @@ func main() {
 	for name, ucfg := range cfg.Upstreams {
 		u, err := buildUpstream(ctx, name, ucfg)
 		if err != nil {
-			slog.Error("failed to build upstream",
+			slog.Error("upstream failed to initialise, disabling until restart; fix the configuration and restart Beacons",
 				"name", name,
 				"err", err)
-			os.Exit(1)
+			upstreams[name] = upstream.NewDisabled(name, err)
+			continue
 		}
 		if cfg.Sync.DryRun {
 			u = upstream.NewDryRun(u)
@@ -81,7 +82,16 @@ func main() {
 	// Build sources
 	var sources []source.Source
 	for name, scfg := range cfg.Sources {
-		s, err := buildSource(name, scfg, cfg.Defaults, pollInterval, cfg.Sync.UseEvents, debounceDelay, cfg.Sync.StrictEnv, cfg.Sync.StrictValidation)
+		s, err := buildSource(buildSourceOptions{
+			Name:             name,
+			Config:           scfg,
+			Defaults:         cfg.Defaults,
+			PollInterval:     pollInterval,
+			UseEvents:        cfg.Sync.UseEvents,
+			DebounceDelay:    debounceDelay,
+			StrictEnv:        cfg.Sync.StrictEnv,
+			StrictValidation: cfg.Sync.StrictValidation,
+		})
 		if err != nil {
 			slog.Error("failed to build source",
 				"name", name,
@@ -191,9 +201,10 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 	switch cfg.Type {
 	case "cloudflare":
 		return upstreamcloudflare.New(ctx, upstreamcloudflare.Options{
-			Name:     name,
-			APIToken: cfg.APIToken,
-			ZoneID:   cfg.ZoneID,
+			Name:            name,
+			APIToken:        cfg.APIToken,
+			ZoneID:          cfg.ZoneID,
+			MaxAuthFailures: cfg.HTTP.AuthFailureThreshold,
 			RetryOptions: transport.RetryOptions{
 				MaxAttempts: cfg.HTTP.RetryMaxAttempts,
 				BaseDelay:   time.Duration(cfg.HTTP.RetryBaseDelayMs) * time.Millisecond,
@@ -211,27 +222,38 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 	}
 }
 
-func buildSource(name string, cfg model.SourceConfig, defaults model.BaseRecord, pollInterval time.Duration, useEvents bool, debounceDelay time.Duration, strict bool, strictValidation bool) (source.Source, error) {
-	switch cfg.Type {
+type buildSourceOptions struct {
+	Name             string
+	Config           model.SourceConfig
+	Defaults         model.BaseRecord
+	PollInterval     time.Duration
+	UseEvents        bool
+	DebounceDelay    time.Duration
+	StrictEnv        bool
+	StrictValidation bool
+}
+
+func buildSource(opts buildSourceOptions) (source.Source, error) {
+	switch opts.Config.Type {
 	case "docker":
 		return sourcedocker.New(sourcedocker.Options{
-			Name:             name,
-			Host:             cfg.Host,
-			Defaults:         defaults,
-			PollInterval:     pollInterval,
-			UseEvents:        useEvents,
-			DebounceDelay:    debounceDelay,
-			StrictValidation: strictValidation,
+			Name:             opts.Name,
+			Host:             opts.Config.Host,
+			Defaults:         opts.Defaults,
+			PollInterval:     opts.PollInterval,
+			UseEvents:        opts.UseEvents,
+			DebounceDelay:    opts.DebounceDelay,
+			StrictValidation: opts.StrictValidation,
 		})
 	case "yaml":
 		return sourceyaml.New(sourceyaml.Options{
-			Name:             name,
-			Glob:             cfg.Glob,
-			Defaults:         defaults,
-			Strict:           strict,
-			StrictValidation: strictValidation,
+			Name:             opts.Name,
+			Glob:             opts.Config.Glob,
+			Defaults:         opts.Defaults,
+			Strict:           opts.StrictEnv,
+			StrictValidation: opts.StrictValidation,
 		}), nil
 	default:
-		return nil, fmt.Errorf("unknown source type %q for %q", cfg.Type, name)
+		return nil, fmt.Errorf("unknown source type %q for %q", opts.Config.Type, opts.Name)
 	}
 }
