@@ -20,9 +20,10 @@ const (
 type RecordStatus string
 
 const (
-	RecordStatusPending RecordStatus = "pending"
-	RecordStatusSynced  RecordStatus = "synced"
-	RecordStatusFailed  RecordStatus = "failed"
+	RecordStatusPending       RecordStatus = "pending"
+	RecordStatusSynced        RecordStatus = "synced"
+	RecordStatusFailed        RecordStatus = "failed"
+	RecordStatusPendingDelete RecordStatus = "pending_delete"
 )
 
 // BaseRecord holds fields common to all DNS records and shared defaults.
@@ -56,6 +57,10 @@ type Record struct {
 	Status    RecordStatus `json:"status,omitempty"`
 	SyncedAt  time.Time    `json:"synced_at,omitempty"`
 	SyncError string       `json:"sync_error,omitempty"`
+
+	// Failures counts how many consecutive upstream operation attempts have failed
+	// for this record.
+	Failures int `json:"failures,omitempty"`
 }
 
 // UpstreamHTTPConfig holds HTTP client tuning for an upstream adapter.

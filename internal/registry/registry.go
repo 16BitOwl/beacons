@@ -18,6 +18,10 @@ type Store interface {
 	// Delete removes all records for a given sourceID.
 	Delete(sourceID string) error
 
+	// DeleteRecord removes a single record identified by (sourceID, recordID, upstream).
+	// It is a no-op if the record does not exist.
+	DeleteRecord(r model.Record) error
+
 	// List returns all currently stored records.
 	List() ([]model.Record, error)
 

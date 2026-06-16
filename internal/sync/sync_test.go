@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/16bitowl/beacons/pkg/source"
 	upstreampkg "github.com/16bitowl/beacons/pkg/upstream"
 )
+
+var errUpstream = errors.New("upstream error")
 
 // ---------------------------------------------------------------------------
 // Mock store (no mutex — tests are single-goroutine)
@@ -46,6 +49,14 @@ func (m *mockStore) Delete(sourceID string) error {
 			delete(m.records, k)
 		}
 	}
+	return nil
+}
+
+func (m *mockStore) DeleteRecord(r model.Record) error {
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+	delete(m.records, storeKey(r))
 	return nil
 }
 
@@ -288,6 +299,29 @@ func TestHandleDelete_RemovesRecordsForSourceID(t *testing.T) {
 	}
 }
 
+func TestHandleDelete_UpstreamFailure_MarkedAsPendingDelete(t *testing.T) {
+	store := newMockStore()
+	up := newMockUpstream("cf")
+	up.deleteErr = errUpstream
+	s := newSyncer(store, map[string]*mockUpstream{"cf": up})
+
+	_ = store.Upsert(makeRecord("ctr1", "web", "cf"))
+
+	ev := source.Event{Type: source.EventDelete, SourceName: "docker", SourceID: "ctr1"}
+	s.handleDelete(context.Background(), ev)
+
+	records, _ := store.List()
+	if len(records) != 1 {
+		t.Fatalf("store len = %d, want 1 (record retained after upstream failure)", len(records))
+	}
+	if records[0].Status != model.RecordStatusPendingDelete {
+		t.Errorf("status = %q, want pending_delete", records[0].Status)
+	}
+	if records[0].Failures != 1 {
+		t.Errorf("failures = %d, want 1", records[0].Failures)
+	}
+}
+
 func TestHandleDelete_UnknownUpstream_StoreStillCleaned(t *testing.T) {
 	store := newMockStore()
 	up := newMockUpstream("cf")
@@ -361,6 +395,32 @@ func TestHandleSync_RemovesOrphanedRecords(t *testing.T) {
 		if r.SourceID == "ctr2" {
 			t.Error("orphaned ctr2 should have been removed from store")
 		}
+	}
+}
+
+func TestHandleSync_OrphanUpstreamFailure_MarkedAsPendingDelete(t *testing.T) {
+	store := newMockStore()
+	up := newMockUpstream("cf")
+	up.deleteErr = errUpstream
+	s := newSyncer(store, map[string]*mockUpstream{"cf": up})
+
+	orphan := makeRecord("ctr2", "api", "cf")
+	orphan.SourceName = "docker"
+	_ = store.Upsert(orphan)
+
+	// Snapshot is empty — ctr2 is orphaned, but upstream delete will fail.
+	ev := source.Event{Type: source.EventSync, SourceName: "docker"}
+	s.handleSync(context.Background(), ev)
+
+	records, _ := store.List()
+	if len(records) != 1 {
+		t.Fatalf("store len = %d, want 1 (orphan retained after upstream failure)", len(records))
+	}
+	if records[0].Status != model.RecordStatusPendingDelete {
+		t.Errorf("status = %q, want pending_delete", records[0].Status)
+	}
+	if records[0].Failures != 1 {
+		t.Errorf("failures = %d, want 1", records[0].Failures)
 	}
 }
 
@@ -467,6 +527,175 @@ func TestRetryFailed_EmptyStore_NoOp(t *testing.T) {
 
 	if len(up.upsertCalls) != 0 {
 		t.Errorf("upstream.Upsert call count = %d, want 0", len(up.upsertCalls))
+	}
+}
+
+func TestRetryFailed_RetriesPendingDeleteRecords(t *testing.T) {
+	store := newMockStore()
+	up := newMockUpstream("cf")
+	s := newSyncer(store, map[string]*mockUpstream{"cf": up})
+
+	r := makeRecord("src1", "web", "cf")
+	r.Status = model.RecordStatusPendingDelete
+	r.Failures = 1
+	_ = store.Upsert(r)
+
+	s.retryFailed(context.Background())
+
+	if len(up.deleteCalls) != 1 {
+		t.Errorf("upstream.Delete call count = %d, want 1", len(up.deleteCalls))
+	}
+	if len(up.upsertCalls) != 0 {
+		t.Errorf("upstream.Upsert should not be called for pending_delete record")
+	}
+	// Upstream succeeded — record should be gone from the store.
+	records, _ := store.List()
+	if len(records) != 0 {
+		t.Errorf("store len = %d, want 0 after successful retry", len(records))
+	}
+}
+
+func TestDeleteRecord_Failures_IncrementsOnEachRetry(t *testing.T) {
+	store := newMockStore()
+	up := newMockUpstream("cf")
+	up.deleteErr = errUpstream
+	s := newSyncer(store, map[string]*mockUpstream{"cf": up})
+
+	_ = store.Upsert(makeRecord("src1", "web", "cf"))
+
+	// First failure.
+	records, _ := store.List()
+	s.deleteRecord(context.Background(), records[0])
+	records, _ = store.List()
+	if records[0].Failures != 1 {
+		t.Fatalf("failures after 1st attempt = %d, want 1", records[0].Failures)
+	}
+
+	// Second failure — counter must increment again.
+	s.deleteRecord(context.Background(), records[0])
+	records, _ = store.List()
+	if records[0].Failures != 2 {
+		t.Errorf("failures after 2nd attempt = %d, want 2", records[0].Failures)
+	}
+}
+
+func TestDeleteRecord_SuccessAfterFailures_ResetsCounter(t *testing.T) {
+	store := newMockStore()
+	up := newMockUpstream("cf")
+	s := newSyncer(store, map[string]*mockUpstream{"cf": up})
+
+	r := makeRecord("src1", "web", "cf")
+	r.Status = model.RecordStatusPendingDelete
+	r.Failures = 3
+	_ = store.Upsert(r)
+
+	// Upstream now succeeds.
+	s.deleteRecord(context.Background(), r)
+
+	records, _ := store.List()
+	if len(records) != 0 {
+		t.Errorf("store len = %d, want 0 (record removed after successful delete)", len(records))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// backoffTicks
+// ---------------------------------------------------------------------------
+
+func TestBackoffTicks_LowFailureRetryEveryTick(t *testing.T) {
+	cases := []struct {
+		failures int
+		want     uint64
+	}{
+		{0, 1},
+		{1, 1},
+		{2, 2},
+		{3, 4},
+		{4, 8},
+		{5, 16},
+		{6, 32},
+		{7, 32}, // capped
+		{100, 32},
+	}
+	for _, c := range cases {
+		if got := backoffTicks(c.failures); got != c.want {
+			t.Errorf("backoffTicks(%d) = %d, want %d", c.failures, got, c.want)
+		}
+	}
+}
+
+func TestRetryFailed_BackoffSkipsHighFailureRecords(t *testing.T) {
+	store := newMockStore()
+	up := newMockUpstream("cf")
+	up.deleteErr = errUpstream
+	s := newSyncer(store, map[string]*mockUpstream{"cf": up})
+
+	// failures=3 → backoffTicks=4, so only retried when retryTick%4==0.
+	r := makeRecord("src1", "web", "cf")
+	r.Status = model.RecordStatusPendingDelete
+	r.Failures = 3
+	_ = store.Upsert(r)
+
+	// Ticks 1, 2, 3 should all be skipped.
+	s.retryFailed(context.Background()) // tick 1
+	s.retryFailed(context.Background()) // tick 2
+	s.retryFailed(context.Background()) // tick 3
+	if len(up.deleteCalls) != 0 {
+		t.Errorf("upstream.Delete call count = %d before tick 4, want 0", len(up.deleteCalls))
+	}
+
+	// Tick 4 should fire.
+	up.deleteErr = nil
+	s.retryFailed(context.Background()) // tick 4
+	if len(up.deleteCalls) != 1 {
+		t.Errorf("upstream.Delete call count = %d at tick 4, want 1", len(up.deleteCalls))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// upsert failure counter
+// ---------------------------------------------------------------------------
+
+func TestUpsertRecord_Failures_IncrementsOnEachFailure(t *testing.T) {
+	store := newMockStore()
+	up := newMockUpstream("cf")
+	up.upsertErr = errUpstream
+	s := newSyncer(store, map[string]*mockUpstream{"cf": up})
+
+	_ = store.Upsert(makeRecord("src1", "web", "cf"))
+
+	records, _ := store.List()
+	s.upsertRecord(context.Background(), records[0])
+	records, _ = store.List()
+	if records[0].Failures != 1 {
+		t.Fatalf("failures after 1st attempt = %d, want 1", records[0].Failures)
+	}
+
+	s.upsertRecord(context.Background(), records[0])
+	records, _ = store.List()
+	if records[0].Failures != 2 {
+		t.Errorf("failures after 2nd attempt = %d, want 2", records[0].Failures)
+	}
+}
+
+func TestUpsertRecord_Failures_ResetOnSuccess(t *testing.T) {
+	store := newMockStore()
+	up := newMockUpstream("cf")
+	s := newSyncer(store, map[string]*mockUpstream{"cf": up})
+
+	r := makeRecord("src1", "web", "cf")
+	r.Status = model.RecordStatusFailed
+	r.Failures = 4
+	_ = store.Upsert(r)
+
+	s.upsertRecord(context.Background(), r)
+
+	records, _ := store.List()
+	if records[0].Failures != 0 {
+		t.Errorf("failures after successful upsert = %d, want 0", records[0].Failures)
+	}
+	if records[0].Status != model.RecordStatusSynced {
+		t.Errorf("status = %q, want synced", records[0].Status)
 	}
 }
 

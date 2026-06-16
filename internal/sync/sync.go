@@ -27,6 +27,7 @@ type Syncer struct {
 	upstreams     map[string]upstream.Upstream
 	retryInterval time.Duration
 	metrics       *metrics.Metrics
+	retryTick     uint64
 }
 
 // New creates a Syncer. RetryInterval controls how often failed records are
@@ -116,8 +117,6 @@ func (s *Syncer) handleSync(ctx context.Context, ev source.Event) {
 	}
 
 	// Find orphaned sourceIDs: present in the store but absent from the snapshot.
-	// These represent source items (containers, files) that disappeared while
-	// Beacons was not running.
 	orphanedSourceIDs := make(map[string]struct{})
 	for _, r := range existing {
 		if _, ok := activeSourceIDs[r.SourceID]; !ok {
@@ -125,7 +124,9 @@ func (s *Syncer) handleSync(ctx context.Context, ev source.Event) {
 		}
 	}
 
-	// Delete orphaned records from upstreams, then remove them from the store.
+	// Delete orphaned records from upstreams and remove successful ones from the
+	// store. Records whose upstream delete fails are marked pending_delete so
+	// the retry loop re-attempts them independently of the next sync cycle.
 	if len(orphanedSourceIDs) > 0 {
 		slog.Info("sync: removing orphaned records",
 			"source", ev.SourceName,
@@ -135,31 +136,12 @@ func (s *Syncer) handleSync(ctx context.Context, ev source.Event) {
 			if _, ok := orphanedSourceIDs[r.SourceID]; !ok {
 				continue
 			}
-			u, ok := s.upstreams[r.Upstream]
-			if !ok {
-				slog.Warn("sync: unknown upstream for orphaned record, skipping",
-					"upstream", r.Upstream,
-					"record", r.ID)
-				continue
-			}
 			slog.Info("sync: deleting orphaned record",
 				"source", ev.SourceName,
 				"source_id", shortID(r.SourceID),
 				"record", r.ID,
 				"name", r.Name)
-			if err := u.Delete(ctx, r); err != nil {
-				slog.Error("sync: upstream delete failed for orphan",
-					"record", r.ID,
-					"upstream", r.Upstream,
-					"err", err)
-			}
-		}
-		for sid := range orphanedSourceIDs {
-			if err := s.store.Delete(sid); err != nil {
-				slog.Error("sync: store delete failed for orphan",
-					"source_id", sid,
-					"err", err)
-			}
+			s.deleteRecord(ctx, r)
 		}
 	}
 
@@ -197,43 +179,77 @@ func (s *Syncer) handleDelete(ctx context.Context, ev source.Event) {
 		if r.SourceID != ev.SourceID {
 			continue
 		}
-		u, ok := s.upstreams[r.Upstream]
-		if !ok {
-			continue
-		}
-		slog.Info("deleting record",
-			"upstream", r.Upstream,
-			"record", r.ID,
-			"type", r.Type,
-			"name", r.Name)
-		start := time.Now()
-		err := u.Delete(ctx, r)
-		if s.metrics != nil {
-			result := "success"
-			if err != nil {
-				result = "failure"
-			}
-			s.metrics.RecordSync(r.Upstream, "delete", result, time.Since(start))
-		}
-		if err != nil {
-			slog.Error("upstream delete failed",
-				"upstream", r.Upstream,
-				"record", r.ID,
-				"err", err)
-		} else {
+		if err := s.deleteRecord(ctx, r); err == nil {
 			deleted++
 		}
 	}
-	if err := s.store.Delete(ev.SourceID); err != nil {
-		slog.Error("store delete failed",
-			"source_id", ev.SourceID,
-			"err", err)
-	} else {
-		slog.Info("source records deleted",
-			"source", ev.SourceName,
-			"source_id", ev.SourceID,
-			"count", deleted)
+	slog.Info("source records deleted",
+		"source", ev.SourceName,
+		"source_id", shortID(ev.SourceID),
+		"count", deleted)
+}
+
+// deleteRecord removes a single record from its upstream and the store.
+//
+// On success the record is removed from the store and nil is returned.
+// On upstream failure the record is written back to the store with status
+// pending_delete and an incremented Failures counter, and the error is
+// returned. The retry loop will re-attempt pending_delete records on its next
+// eligible tick (subject to exponential back-off via backoffTicks).
+func (s *Syncer) deleteRecord(ctx context.Context, r model.Record) error {
+	u, ok := s.upstreams[r.Upstream]
+	if !ok {
+		// Unknown upstream — nothing to clean up remotely; drop the dangling entry.
+		if err := s.store.DeleteRecord(r); err != nil {
+			slog.Error("store delete failed for unknown-upstream record",
+				"record", r.ID,
+				"err", err)
+		}
+		return nil
 	}
+
+	slog.Info("deleting record",
+		"upstream", r.Upstream,
+		"record", r.ID,
+		"type", r.Type,
+		"name", r.Name)
+
+	start := time.Now()
+	err := u.Delete(ctx, r)
+	if s.metrics != nil {
+		result := "success"
+		if err != nil {
+			result = "failure"
+		}
+		s.metrics.RecordSync(r.Upstream, "delete", result, time.Since(start))
+	}
+	if err != nil {
+		r.Failures++
+		r.Status = model.RecordStatusPendingDelete
+		r.SyncError = err.Error()
+		slog.Error("upstream delete failed, marked as pending_delete",
+			"upstream", r.Upstream,
+			"record", r.ID,
+			"failures", r.Failures,
+			"err", err)
+		if storeErr := s.store.Upsert(r); storeErr != nil {
+			slog.Error("store upsert failed after delete failure",
+				"record", r.ID,
+				"err", storeErr)
+		}
+		return err
+	}
+
+	slog.Info("record deleted successfully",
+		"upstream", r.Upstream,
+		"record", r.ID,
+		"name", r.Name)
+	if storeErr := s.store.DeleteRecord(r); storeErr != nil {
+		slog.Error("store delete failed",
+			"record", r.ID,
+			"err", storeErr)
+	}
+	return nil
 }
 
 // upsertRecord pushes a single record to its upstream and writes the result
@@ -264,20 +280,23 @@ func (s *Syncer) upsertRecord(ctx context.Context, r model.Record) {
 		s.metrics.RecordSync(r.Upstream, "upsert", result, time.Since(start))
 	}
 	if err != nil {
+		r.Failures++
+		r.Status = model.RecordStatusFailed
+		r.SyncError = err.Error()
 		slog.Error("upstream upsert failed",
 			"upstream", r.Upstream,
 			"record", r.ID,
+			"failures", r.Failures,
 			"err", err)
-		r.Status = model.RecordStatusFailed
-		r.SyncError = err.Error()
 	} else {
+		r.Failures = 0
+		r.Status = model.RecordStatusSynced
+		r.SyncedAt = time.Now()
+		r.SyncError = ""
 		slog.Info("record upserted successfully",
 			"upstream", r.Upstream,
 			"record", r.ID,
 			"name", r.Name)
-		r.Status = model.RecordStatusSynced
-		r.SyncedAt = time.Now()
-		r.SyncError = ""
 	}
 
 	if err := s.store.Upsert(r); err != nil {
@@ -287,29 +306,53 @@ func (s *Syncer) upsertRecord(ctx context.Context, r model.Record) {
 	}
 }
 
-// retryFailed re-attempts every record in the store that is currently marked
-// as failed. It is called on a ticker and runs entirely off the store — no
-// source events are needed for retries to fire.
+// retryFailed re-attempts records that are in a non-terminal error state.
+// It is called on a ticker and runs entirely off the store — no source events
+// are needed for retries to fire.
+//
+//   - failed records are re-pushed to their upstream via upsertRecord.
+//   - pending_delete records are re-deleted from their upstream via deleteRecord.
+//
+// Records are subject to exponential back-off: a record with N consecutive
+// failures is only retried every backoffTicks(N) ticks, so transient errors
+// (or permanently broken credentials) do not hammer the upstream API.
 func (s *Syncer) retryFailed(ctx context.Context) {
+	s.retryTick++
+
 	records, err := s.store.List()
 	if err != nil {
 		slog.Error("retry: store list failed", "err", err)
 		return
 	}
 
-	var failed []model.Record
+	var toUpsert, toDelete []model.Record
 	for _, r := range records {
-		if r.Status == model.RecordStatusFailed {
-			failed = append(failed, r)
+		switch r.Status {
+		case model.RecordStatusFailed:
+			if s.retryTick%backoffTicks(r.Failures) == 0 {
+				toUpsert = append(toUpsert, r)
+			}
+		case model.RecordStatusPendingDelete:
+			if s.retryTick%backoffTicks(r.Failures) == 0 {
+				toDelete = append(toDelete, r)
+			}
 		}
 	}
-	if len(failed) == 0 {
+	if len(toUpsert) == 0 && len(toDelete) == 0 {
 		return
 	}
 
-	slog.Info("retrying failed records", "count", len(failed))
-	for _, r := range failed {
-		s.upsertRecord(ctx, r)
+	if len(toUpsert) > 0 {
+		slog.Info("retrying failed upsert records", "count", len(toUpsert))
+		for _, r := range toUpsert {
+			s.upsertRecord(ctx, r)
+		}
+	}
+	if len(toDelete) > 0 {
+		slog.Info("retrying pending delete records", "count", len(toDelete))
+		for _, r := range toDelete {
+			s.deleteRecord(ctx, r)
+		}
 	}
 }
 
@@ -319,4 +362,23 @@ func shortID(id string) string {
 		return id
 	}
 	return id[:12]
+}
+
+// backoffTicks returns how many retry ticks must elapse between attempts for a
+// record with the given consecutive failure count. The interval doubles with
+// each failure, capped at 2^5 = 32 ticks.
+//
+//	failures 0–1 → every tick (1)
+//	failures 2   → every 2 ticks
+//	failures 3   → every 4 ticks
+//	failures 6+  → every 32 ticks (cap)
+func backoffTicks(failures int) uint64 {
+	if failures <= 1 {
+		return 1
+	}
+	shift := failures - 1
+	if shift > 5 {
+		shift = 5
+	}
+	return 1 << uint(shift)
 }

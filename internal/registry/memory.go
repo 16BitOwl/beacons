@@ -35,6 +35,13 @@ func (m *MemoryStore) Delete(sourceID string) error {
 	return nil
 }
 
+func (m *MemoryStore) DeleteRecord(r model.Record) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.records, recordKey(r))
+	return nil
+}
+
 func (m *MemoryStore) List() ([]model.Record, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
