@@ -67,10 +67,11 @@ func main() {
 	for name, ucfg := range cfg.Upstreams {
 		u, err := buildUpstream(ctx, name, ucfg)
 		if err != nil {
-			slog.Error("failed to build upstream",
+			slog.Error("upstream failed to initialise, disabling until restart; fix the configuration and restart Beacons",
 				"name", name,
 				"err", err)
-			os.Exit(1)
+			upstreams[name] = upstream.NewDisabled(name, err)
+			continue
 		}
 		if cfg.Sync.DryRun {
 			u = upstream.NewDryRun(u)
@@ -200,9 +201,10 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 	switch cfg.Type {
 	case "cloudflare":
 		return upstreamcloudflare.New(ctx, upstreamcloudflare.Options{
-			Name:     name,
-			APIToken: cfg.APIToken,
-			ZoneID:   cfg.ZoneID,
+			Name:            name,
+			APIToken:        cfg.APIToken,
+			ZoneID:          cfg.ZoneID,
+			MaxAuthFailures: cfg.HTTP.AuthFailureThreshold,
 			RetryOptions: transport.RetryOptions{
 				MaxAttempts: cfg.HTTP.RetryMaxAttempts,
 				BaseDelay:   time.Duration(cfg.HTTP.RetryBaseDelayMs) * time.Millisecond,
