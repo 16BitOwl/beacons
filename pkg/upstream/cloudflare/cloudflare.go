@@ -53,20 +53,15 @@ func New(ctx context.Context, opts Options) (*Upstream, error) {
 		return nil, fmt.Errorf("cloudflare fetch zone details: %w", err)
 	}
 
-	// Runtime client gets the full transport chain: circuit breaker outermost so
-	// it can short-circuit before retry even runs.
+	// Runtime client gets the full transport chain via the shared constructor:
+	// circuit breaker (outermost) → retry → attempt timeout → bearer auth.
 	c := &cfClient{
-		http: &http.Client{
-			Timeout: 15 * time.Second,
-			Transport: transport.Chain(nil,
-				transport.CircuitBreaker(transport.CircuitBreakerOptions{
-					Name:            opts.Name,
-					MaxAuthFailures: opts.MaxAuthFailures,
-				}),
-				transport.Retry(opts.RetryOptions),
-				transport.Bearer(opts.APIToken),
-			),
-		},
+		http: transport.NewClient(transport.ClientOptions{
+			Name:            opts.Name,
+			Retry:           opts.RetryOptions,
+			MaxAuthFailures: opts.MaxAuthFailures,
+			Auth:            transport.Bearer(opts.APIToken),
+		}),
 		zoneID:  opts.ZoneID,
 		baseURL: apiBase,
 	}

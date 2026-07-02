@@ -8,31 +8,32 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/16bitowl/beacons/internal/model"
+	"github.com/16bitowl/beacons/pkg/upstream/transport"
 )
+
+// attemptTimeout bounds each individual HTTP attempt (not the retry chain).
+const attemptTimeout = 10 * time.Second
+
+// sidHeader carries the PiHole session token on authenticated requests.
+const sidHeader = "X-FTL-SID"
 
 // Upstream is the PiHole upstream adapter.
 // Supports A, AAAA and CNAME records via the PiHole v6 config API.
 // Other record types are not supported by PiHole.
+//
+// Authentication, retry, and circuit-breaking are handled by the transport
+// middleware chain on client; session tokens are acquired via authenticate,
+// which uses authClient (a plain retrying client with no session middleware, to
+// avoid recursion).
 type Upstream struct {
-	mu       sync.Mutex
-	name     string
-	baseURL  string
-	password string
-	client   *http.Client
-	session  session
-}
-
-type session struct {
-	sid       string
-	expiresAt time.Time
-}
-
-func (s *session) valid() bool {
-	return s.sid != "" && time.Now().Before(s.expiresAt)
+	name       string
+	baseURL    string
+	password   string
+	client     *http.Client
+	authClient *http.Client
 }
 
 // authRequest is the POST /api/auth request body.
@@ -52,18 +53,42 @@ type authResponse struct {
 
 // Options configures a PiHole upstream adapter.
 type Options struct {
-	Name     string
-	BaseURL  string
-	Password string
+	Name            string
+	BaseURL         string
+	Password        string
+	RetryOptions    transport.RetryOptions // zero value uses defaults
+	MaxAuthFailures int                    // consecutive 401s before disabling; 0 uses transport default
 }
 
 func New(opts Options) *Upstream {
-	return &Upstream{
+	u := &Upstream{
 		name:     opts.Name,
 		baseURL:  strings.TrimRight(opts.BaseURL, "/"),
 		password: opts.Password,
-		client:   &http.Client{Timeout: 10 * time.Second},
+		// authClient acquires sessions: it retries transient failures but carries
+		// no session middleware (there is no token yet) and no circuit breaker.
+		// The timeout is per attempt, matching the runtime client.
+		authClient: &http.Client{
+			Transport: transport.Chain(nil,
+				transport.Retry(opts.RetryOptions),
+				transport.AttemptTimeout(attemptTimeout),
+			),
+		},
 	}
+
+	// Runtime client: circuit breaker (outermost) → retry → attempt timeout →
+	// session auth.
+	u.client = transport.NewClient(transport.ClientOptions{
+		Name:            opts.Name,
+		Timeout:         attemptTimeout,
+		Retry:           opts.RetryOptions,
+		MaxAuthFailures: opts.MaxAuthFailures,
+		Auth: transport.SessionAuth(transport.SessionAuthOptions{
+			Header:       sidHeader,
+			Authenticate: u.authenticate,
+		}),
+	})
+	return u
 }
 
 func (u *Upstream) Name() string { return u.name }
@@ -221,143 +246,93 @@ func containsEntry(entries []string, entry string) bool {
 	return false
 }
 
-// ensureSession obtains or reuses a valid session token.
-func (u *Upstream) ensureSession(ctx context.Context) (string, error) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
+// authenticate acquires a PiHole session token. It is supplied to the
+// SessionAuth middleware, which caches the token and re-invokes this on HTTP
+// 401. It uses authClient (no session middleware) to avoid recursion.
+func (u *Upstream) authenticate(ctx context.Context) (transport.Session, error) {
+	slog.Debug("pihole authenticating",
+		"upstream", u.name,
+		"url", u.baseURL)
 
-	if u.session.valid() {
-		return u.session.sid, nil
+	body, err := json.Marshal(authRequest{Password: u.password})
+	if err != nil {
+		return transport.Session{}, err
 	}
-
-	slog.Debug("pihole authenticating", "upstream", u.name, "url", u.baseURL)
-	body, _ := json.Marshal(authRequest{Password: u.password})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.baseURL+"/api/auth", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return transport.Session{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := u.client.Do(req)
+	resp, err := u.authClient.Do(req)
 	if err != nil {
-		return "", err
+		return transport.Session{}, err
 	}
 	defer resp.Body.Close()
 
 	var ar authResponse
 	if err := json.NewDecoder(resp.Body).Decode(&ar); err != nil {
-		return "", fmt.Errorf("pihole: failed to decode auth response: %w", err)
+		return transport.Session{}, fmt.Errorf("pihole: failed to decode auth response: %w", err)
 	}
 	if !ar.Session.Valid {
-		return "", fmt.Errorf("pihole: authentication failed: %s", ar.Session.Message)
+		// Wrap ErrAuthFailed so Retry does not retry this and the circuit
+		// breaker counts it towards disabling the upstream.
+		return transport.Session{}, fmt.Errorf("pihole: %w: %s", transport.ErrAuthFailed, ar.Session.Message)
 	}
 
-	// validity=-1 means no auth required; sid will be empty/null — that's fine.
-	ttl := ar.Session.Validity
-	if ttl <= 0 {
-		ttl = 1800 // default 30 min
-	}
-	u.session = session{
-		sid:       ar.Session.SID,
-		expiresAt: time.Now().Add(time.Duration(ttl)*time.Second - 30*time.Second),
-	}
-	slog.Info("pihole session established", "upstream", u.name, "validity_seconds", ttl)
-	return u.session.sid, nil
-}
-
-// invalidateSession clears the cached session so the next ensureSession call
-// will re-authenticate. Call this when a request returns HTTP 401.
-func (u *Upstream) invalidateSession() {
-	u.mu.Lock()
-	u.session = session{}
-	u.mu.Unlock()
+	// validity=-1 means no auth required; SID will be empty — the SessionAuth
+	// middleware then omits the header. A non-positive validity caches for the
+	// middleware's default window.
+	slog.Info("pihole session established",
+		"upstream", u.name,
+		"validity_seconds", ar.Session.Validity)
+	return transport.Session{
+		Token:     ar.Session.SID,
+		ExpiresIn: time.Duration(ar.Session.Validity) * time.Second,
+	}, nil
 }
 
 // get performs an authenticated GET and decodes the JSON response into dst.
-// On HTTP 401 it invalidates the session and retries once.
+// Session handling, retry, and circuit-breaking are applied by client's
+// transport chain.
 func (u *Upstream) get(ctx context.Context, path string, dst any) error {
-	execute := func(sid string) (int, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.baseURL+path, nil)
-		if err != nil {
-			return 0, err
-		}
-		if sid != "" {
-			req.Header.Set("X-FTL-SID", sid)
-		}
-		resp, err := u.client.Do(req)
-		if err != nil {
-			return 0, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return resp.StatusCode, fmt.Errorf("pihole: GET %s returned %d", path, resp.StatusCode)
-		}
-		return resp.StatusCode, json.NewDecoder(resp.Body).Decode(dst)
-	}
-
-	sid, err := u.ensureSession(ctx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.baseURL+path, nil)
 	if err != nil {
 		return err
 	}
-	status, err := execute(sid)
-	if err != nil && status == http.StatusUnauthorized {
-		slog.Debug("pihole session expired mid-request, re-authenticating",
-			"upstream", u.name)
-		u.invalidateSession()
-		if sid, err = u.ensureSession(ctx); err != nil {
-			return err
-		}
-		_, err = execute(sid)
+	resp, err := u.client.Do(req)
+	if err != nil {
+		return err
 	}
-	return err
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("pihole: GET %s returned %d", path, resp.StatusCode)
+	}
+	return json.NewDecoder(resp.Body).Decode(dst)
 }
 
-// patch performs an authenticated PATCH with a JSON body.
-// On HTTP 401 it invalidates the session and retries once.
+// patch performs an authenticated PATCH with a JSON body. Session handling,
+// retry, and circuit-breaking are applied by client's transport chain.
 func (u *Upstream) patch(ctx context.Context, payload any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-
-	execute := func(sid string) (int, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPatch, u.baseURL+"/api/config", bytes.NewReader(body))
-		if err != nil {
-			return 0, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if sid != "" {
-			req.Header.Set("X-FTL-SID", sid)
-		}
-		resp, err := u.client.Do(req)
-		if err != nil {
-			return 0, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusUnauthorized {
-			return resp.StatusCode, fmt.Errorf("pihole: PATCH /api/config returned %d", resp.StatusCode)
-		}
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-			var errBody map[string]any
-			_ = json.NewDecoder(resp.Body).Decode(&errBody)
-			return resp.StatusCode, fmt.Errorf("pihole: PATCH /api/config returned %d: %v", resp.StatusCode, errBody)
-		}
-		return resp.StatusCode, nil
-	}
-
-	sid, err := u.ensureSession(ctx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, u.baseURL+"/api/config", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	status, err := execute(sid)
-	if err != nil && status == http.StatusUnauthorized {
-		slog.Debug("pihole session expired mid-request, re-authenticating",
-			"upstream", u.name)
-		u.invalidateSession()
-		if sid, err = u.ensureSession(ctx); err != nil {
-			return err
-		}
-		_, err = execute(sid)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := u.client.Do(req)
+	if err != nil {
+		return err
 	}
-	return err
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		var errBody map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&errBody)
+		return fmt.Errorf("pihole: PATCH /api/config returned %d: %v", resp.StatusCode, errBody)
+	}
+	return nil
 }
