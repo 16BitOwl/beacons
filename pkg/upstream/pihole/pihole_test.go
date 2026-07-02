@@ -2,11 +2,13 @@ package pihole
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
+
+	"github.com/16bitowl/beacons/pkg/upstream/transport"
 )
 
 // ---------------------------------------------------------------------------
@@ -90,46 +92,6 @@ func TestToggleEntry_PreservesOrder(t *testing.T) {
 	// first, second, third are preserved in order, fourth appended
 	if got[0] != "first" || got[1] != "second" || got[2] != "third" || got[3] != "fourth" {
 		t.Errorf("order not preserved: %v", got)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// session.valid
-// ---------------------------------------------------------------------------
-
-func TestSessionValid_EmptySID_ReturnsFalse(t *testing.T) {
-	s := session{sid: "", expiresAt: time.Now().Add(time.Hour)}
-	if s.valid() {
-		t.Error("session with empty SID should not be valid")
-	}
-}
-
-func TestSessionValid_Expired_ReturnsFalse(t *testing.T) {
-	s := session{sid: "tok", expiresAt: time.Now().Add(-time.Second)}
-	if s.valid() {
-		t.Error("expired session should not be valid")
-	}
-}
-
-func TestSessionValid_ValidSession_ReturnsTrue(t *testing.T) {
-	s := session{sid: "tok-abc", expiresAt: time.Now().Add(time.Hour)}
-	if !s.valid() {
-		t.Error("valid session should return true")
-	}
-}
-
-func TestSessionValid_ExpiresAtExactlyNow_ReturnsFalse(t *testing.T) {
-	// time.Now().Before(now) is false → invalid.
-	s := session{sid: "tok", expiresAt: time.Now().Add(-time.Millisecond)}
-	if s.valid() {
-		t.Error("session expiring in the past should not be valid")
-	}
-}
-
-func TestSessionValid_ZeroTime_ReturnsFalse(t *testing.T) {
-	s := session{sid: "tok", expiresAt: time.Time{}}
-	if s.valid() {
-		t.Error("zero expiry time should not be valid")
 	}
 }
 
@@ -260,5 +222,29 @@ func TestPatch_PersistentUnauthorized_ReturnsError(t *testing.T) {
 	u := New(Options{Name: "test", BaseURL: srv.URL, Password: "pw"})
 	if err := u.patch(context.Background(), map[string]any{"key": "val"}); err == nil {
 		t.Fatal("expected error after persistent 401, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// authenticate
+// ---------------------------------------------------------------------------
+
+func TestAuthenticate_RejectedCredentials_WrapsErrAuthFailed(t *testing.T) {
+	authCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authCalls++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"session":{"valid":false,"sid":"","validity":0,"message":"password incorrect"}}`)
+	}))
+	defer srv.Close()
+
+	u := New(Options{Name: "test", BaseURL: srv.URL, Password: "wrong"})
+	_, err := u.authenticate(context.Background())
+	if !errors.Is(err, transport.ErrAuthFailed) {
+		t.Errorf("err = %v, want error wrapping transport.ErrAuthFailed", err)
+	}
+	if authCalls != 1 {
+		t.Errorf("auth endpoint calls = %d, want 1 (401 is not retryable)", authCalls)
 	}
 }

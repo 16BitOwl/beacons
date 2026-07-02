@@ -205,20 +205,28 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 			APIToken:        cfg.APIToken,
 			ZoneID:          cfg.ZoneID,
 			MaxAuthFailures: cfg.HTTP.AuthFailureThreshold,
-			RetryOptions: transport.RetryOptions{
-				MaxAttempts: cfg.HTTP.RetryMaxAttempts,
-				BaseDelay:   time.Duration(cfg.HTTP.RetryBaseDelayMs) * time.Millisecond,
-				MaxDelay:    time.Duration(cfg.HTTP.RetryMaxDelayMs) * time.Millisecond,
-			},
+			RetryOptions:    httpRetryOptions(cfg.HTTP),
 		})
 	case "pihole":
 		return upstreampihole.New(upstreampihole.Options{
-			Name:     name,
-			BaseURL:  cfg.URL,
-			Password: cfg.Password,
+			Name:            name,
+			BaseURL:         cfg.URL,
+			Password:        cfg.Password,
+			MaxAuthFailures: cfg.HTTP.AuthFailureThreshold,
+			RetryOptions:    httpRetryOptions(cfg.HTTP),
 		}), nil
 	default:
 		return nil, fmt.Errorf("unknown upstream type %q for %q", cfg.Type, name)
+	}
+}
+
+// httpRetryOptions maps the shared HTTP tuning config into transport retry
+// options. Zero fields fall back to the transport defaults.
+func httpRetryOptions(cfg model.UpstreamHTTPConfig) transport.RetryOptions {
+	return transport.RetryOptions{
+		MaxAttempts: cfg.RetryMaxAttempts,
+		BaseDelay:   time.Duration(cfg.RetryBaseDelayMs) * time.Millisecond,
+		MaxDelay:    time.Duration(cfg.RetryMaxDelayMs) * time.Millisecond,
 	}
 }
 
