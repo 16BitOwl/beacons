@@ -58,9 +58,18 @@ type Options struct {
 	Password        string
 	RetryOptions    transport.RetryOptions // zero value uses defaults
 	MaxAuthFailures int                    // consecutive 401s before disabling; 0 uses transport default
+	// Debug enables full request/response logging. The auth exchange is only
+	// logged with RevealSecrets, as its body carries the password.
+	Debug transport.DebugLogOptions
 }
 
 func New(opts Options) *Upstream {
+	// The auth request body carries the password, so logging the auth exchange
+	// additionally requires RevealSecrets.
+	authDebug := opts.Debug
+	authDebug.Enabled = authDebug.Enabled && authDebug.RevealSecrets
+	authDebug.Name = opts.Name + " (auth)"
+
 	u := &Upstream{
 		name:     opts.Name,
 		baseURL:  strings.TrimRight(opts.BaseURL, "/"),
@@ -72,6 +81,7 @@ func New(opts Options) *Upstream {
 			Transport: transport.Chain(nil,
 				transport.Retry(opts.RetryOptions),
 				transport.AttemptTimeout(attemptTimeout),
+				transport.DebugLog(authDebug),
 			),
 		},
 	}
@@ -87,6 +97,7 @@ func New(opts Options) *Upstream {
 			Header:       sidHeader,
 			Authenticate: u.authenticate,
 		}),
+		Debug: opts.Debug,
 	})
 	return u
 }

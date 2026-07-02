@@ -47,11 +47,15 @@ type ClientOptions struct {
 	// Auth is an optional authentication middleware (e.g. Bearer or SessionAuth).
 	// Pass nil for upstreams that need no authentication.
 	Auth Middleware
+	// Debug configures the DebugLog middleware, placed innermost when enabled.
+	// Disabled by default; development use only. An empty Debug.Name falls
+	// back to Name.
+	Debug DebugLogOptions
 }
 
 // NewClient builds an *http.Client whose transport applies the canonical
 // resilience middleware in order: CircuitBreaker (outermost) → Retry →
-// AttemptTimeout → Auth.
+// AttemptTimeout → Auth → DebugLog (when enabled).
 //
 // This is the single construction path every upstream adapter should use so
 // that retry, backoff, and circuit-breaking behaviour is identical across
@@ -77,6 +81,13 @@ func NewClient(opts ClientOptions) *http.Client {
 	}
 	if opts.Auth != nil {
 		mws = append(mws, opts.Auth)
+	}
+	if opts.Debug.Enabled {
+		debug := opts.Debug
+		if debug.Name == "" {
+			debug.Name = opts.Name
+		}
+		mws = append(mws, DebugLog(debug))
 	}
 
 	return &http.Client{

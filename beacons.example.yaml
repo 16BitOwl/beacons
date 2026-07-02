@@ -68,6 +68,8 @@ upstreams:
       retry_max_attempts: 3
       retry_base_delay_ms: 500
       retry_max_delay_ms: 30000
+      # debug_log: true         # DEV ONLY: log full requests/responses; also needs BEACONS_LOG_LEVEL=debug
+      # debug_log_secrets: true # DEV ONLY: don't redact auth headers/tokens
 
   cf-zone-b:
     type: cloudflare
