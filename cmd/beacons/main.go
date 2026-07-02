@@ -206,6 +206,7 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 			ZoneID:          cfg.ZoneID,
 			MaxAuthFailures: cfg.HTTP.AuthFailureThreshold,
 			RetryOptions:    httpRetryOptions(cfg.HTTP),
+			Debug:           httpDebugOptions(name, cfg.HTTP),
 		})
 	case "pihole":
 		return upstreampihole.New(upstreampihole.Options{
@@ -214,6 +215,7 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 			Password:        cfg.Password,
 			MaxAuthFailures: cfg.HTTP.AuthFailureThreshold,
 			RetryOptions:    httpRetryOptions(cfg.HTTP),
+			Debug:           httpDebugOptions(name, cfg.HTTP),
 		}), nil
 	default:
 		return nil, fmt.Errorf("unknown upstream type %q for %q", cfg.Type, name)
@@ -227,6 +229,20 @@ func httpRetryOptions(cfg model.UpstreamHTTPConfig) transport.RetryOptions {
 		MaxAttempts: cfg.RetryMaxAttempts,
 		BaseDelay:   time.Duration(cfg.RetryBaseDelayMs) * time.Millisecond,
 		MaxDelay:    time.Duration(cfg.RetryMaxDelayMs) * time.Millisecond,
+	}
+}
+
+// httpDebugOptions maps the shared HTTP tuning config into debug-log options.
+func httpDebugOptions(name string, cfg model.UpstreamHTTPConfig) transport.DebugLogOptions {
+	if cfg.DebugLog {
+		slog.Warn("upstream http debug logging enabled: full requests and responses are written at debug level (set BEACONS_LOG_LEVEL=debug to see them); development use only",
+			"upstream", name,
+			"reveal_secrets", cfg.DebugLogSecrets)
+	}
+	return transport.DebugLogOptions{
+		Enabled:       cfg.DebugLog,
+		Name:          name,
+		RevealSecrets: cfg.DebugLogSecrets,
 	}
 }
 

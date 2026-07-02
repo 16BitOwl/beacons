@@ -72,6 +72,14 @@ type UpstreamHTTPConfig struct {
 	// AuthFailureThreshold is the number of consecutive HTTP 401 responses that
 	// disable the upstream until the process is restarted. 0 uses the transport default (5).
 	AuthFailureThreshold int `yaml:"auth_failure_threshold" validate:"min=0"`
+
+	// DebugLog enables full request/response logging for this upstream.
+	// Development use only; also requires BEACONS_LOG_LEVEL=debug.
+	DebugLog bool `yaml:"debug_log"`
+
+	// DebugLogSecrets disables header redaction in debug logs and, for PiHole,
+	// also logs the authentication exchange. Only honoured with DebugLog.
+	DebugLogSecrets bool `yaml:"debug_log_secrets"`
 }
 
 // UpstreamConfig holds the configuration for a named upstream adapter instance.

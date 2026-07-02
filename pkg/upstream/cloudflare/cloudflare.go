@@ -29,6 +29,8 @@ type Options struct {
 	ZoneID          string
 	RetryOptions    transport.RetryOptions // zero value uses defaults
 	MaxAuthFailures int                    // consecutive 401s before disabling; 0 uses transport default
+	// Debug enables full request/response logging. Development use only.
+	Debug transport.DebugLogOptions
 }
 
 // Upstream is the Cloudflare upstream adapter.
@@ -42,8 +44,11 @@ func New(ctx context.Context, opts Options) (*Upstream, error) {
 	// Use a plain one-shot client for the startup zone validation.
 	initClient := &cfClient{
 		http: &http.Client{
-			Timeout:   15 * time.Second,
-			Transport: transport.Chain(nil, transport.Bearer(opts.APIToken)),
+			Timeout: 15 * time.Second,
+			Transport: transport.Chain(nil,
+				transport.Bearer(opts.APIToken),
+				transport.DebugLog(opts.Debug),
+			),
 		},
 		zoneID:  opts.ZoneID,
 		baseURL: apiBase,
@@ -61,6 +66,7 @@ func New(ctx context.Context, opts Options) (*Upstream, error) {
 			Retry:           opts.RetryOptions,
 			MaxAuthFailures: opts.MaxAuthFailures,
 			Auth:            transport.Bearer(opts.APIToken),
+			Debug:           opts.Debug,
 		}),
 		zoneID:  opts.ZoneID,
 		baseURL: apiBase,
