@@ -539,7 +539,8 @@ records:
 
 	// Write repeatedly until the watcher (added despite the empty initial
 	// match set) picks up the new file; guards against a race with watcher.Add.
-	deadline := time.Now().Add(3 * time.Second)
+	// Each attempt waits past the reload debounce so a picked-up write can fire.
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatalf("WriteFile: %v", err)
@@ -549,7 +550,7 @@ records:
 			if len(ev.Records) == 1 {
 				return
 			}
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(reloadDebounce + 200*time.Millisecond):
 		}
 	}
 	t.Fatal("expected new file to be picked up by watcher after empty startup")

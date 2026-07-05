@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/16bitowl/beacons/internal/envutil"
 	"github.com/16bitowl/beacons/internal/model"
@@ -16,6 +17,10 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/goccy/go-yaml"
 )
+
+// reloadDebounce coalesces bursts of fsnotify events (e.g. an editor's
+// write-rename save) so a reload fires once the file settles, not mid-write.
+const reloadDebounce = 300 * time.Millisecond
 
 // Options configures a YAML source adapter.
 type Options struct {
@@ -84,21 +89,37 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 		}
 	}
 
+	// debounce coalesces rapid events; debounceC fires once they settle.
+	var debounce *time.Timer
+	var debounceC <-chan time.Time
 	for {
 		select {
 		case <-ctx.Done():
+			if debounce != nil {
+				debounce.Stop()
+			}
 			return nil
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return nil
 			}
 			matched, _ := filepath.Match(s.glob, event.Name)
-			if matched {
-				slog.Info("yaml file changed, reloading",
-					"source", s.name,
-					"file", event.Name)
-				s.loadAll(ch)
+			if !matched {
+				continue
 			}
+			slog.Debug("yaml file changed, scheduling reload",
+				"source", s.name,
+				"file", event.Name)
+			if debounce == nil {
+				debounce = time.NewTimer(reloadDebounce)
+				debounceC = debounce.C
+			} else {
+				debounce.Reset(reloadDebounce)
+			}
+		case <-debounceC:
+			slog.Info("yaml reloading after change",
+				"source", s.name)
+			s.loadAll(ch)
 		case err := <-watcher.Errors:
 			slog.Error("yaml watcher error",
 				"source", s.name,
@@ -111,13 +132,19 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 // containing every record found. If a previously loaded file has been deleted
 // or no longer matches, its records will be absent from the snapshot and the
 // syncer will clean them up.
+//
+// A read failure (glob error or any file that fails to parse) must never be
+// mistaken for "no records": emitting a partial or empty snapshot would make the
+// syncer orphan-delete live records. On any such error loadAll logs and returns
+// without emitting, leaving the last good state in place until a clean read.
 func (s *Source) loadAll(ch chan<- source.Event) {
 	files, err := filepath.Glob(s.glob)
 	if err != nil {
-		slog.Error("yaml glob failed",
+		slog.Error("yaml glob failed, skipping reload to preserve live records",
 			"source", s.name,
 			"glob", s.glob,
 			"err", err)
+		return
 	}
 
 	if len(files) == 0 {
@@ -137,10 +164,13 @@ func (s *Source) loadAll(ch chan<- source.Event) {
 	for _, f := range files {
 		records, err := parseFile(s.name, f, s.defaults, s.strict, s.strictValidation)
 		if err != nil {
-			slog.Error("yaml parse failed",
+			// A partial snapshot would orphan-delete this file's records; skip
+			// the whole reload and keep the last good state.
+			slog.Error("yaml parse failed, skipping reload to preserve live records",
+				"source", s.name,
 				"file", f,
 				"err", err)
-			continue
+			return
 		}
 		if len(records) > 0 {
 			slog.Info("yaml file loaded",
