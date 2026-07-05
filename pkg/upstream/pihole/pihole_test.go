@@ -286,7 +286,7 @@ func TestAuthenticate_RejectedCredentials_WrapsErrAuthFailed(t *testing.T) {
 		authCalls++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"session":{"valid":false,"sid":"","validity":0,"message":"password incorrect"}}`)
+		_, _ = fmt.Fprint(w, `{"session":{"valid":false,"sid":"","validity":0,"message":"password incorrect"}}`)
 	}))
 	defer srv.Close()
 

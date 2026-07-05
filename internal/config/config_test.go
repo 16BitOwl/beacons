@@ -39,10 +39,10 @@ func loadYAML(t *testing.T, yaml string) *Config {
 // purely from env vars when no config file is provided.
 func TestStaticFieldsSetFromEnv(t *testing.T) {
 	setenv(t, map[string]string{
-		"BEACONS_DEFAULTS_TTL":      "300",
-		"BEACONS_DEFAULTS_COMMENT":  "hello",
+		"BEACONS_DEFAULTS_TTL":       "300",
+		"BEACONS_DEFAULTS_COMMENT":   "hello",
 		"BEACONS_SYNC_POLL_INTERVAL": "60",
-		"BEACONS_SYNC_DRY_RUN":      "true",
+		"BEACONS_SYNC_DRY_RUN":       "true",
 	})
 
 	cfg, err := Load("")

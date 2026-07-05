@@ -98,7 +98,7 @@ func TestRequired_Slice(t *testing.T) {
 		V []string `validate:"required"`
 	}
 	_ = mustErrors(t, validate.Struct(&S{V: nil}))
-	mustErrors(t, validate.Struct(&S{V: []string{}}))
+	_ = mustErrors(t, validate.Struct(&S{V: []string{}}))
 	mustPass(t, validate.Struct(&S{V: []string{"x"}}))
 }
 
@@ -106,8 +106,8 @@ func TestRequired_Map(t *testing.T) {
 	type S struct {
 		V map[string]string `validate:"required"`
 	}
-	mustErrors(t, validate.Struct(&S{V: nil}))
-	mustErrors(t, validate.Struct(&S{V: map[string]string{}}))
+	_ = mustErrors(t, validate.Struct(&S{V: nil}))
+	_ = mustErrors(t, validate.Struct(&S{V: map[string]string{}}))
 	mustPass(t, validate.Struct(&S{V: map[string]string{"k": "v"}}))
 }
 

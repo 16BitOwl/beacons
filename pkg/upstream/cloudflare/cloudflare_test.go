@@ -150,7 +150,7 @@ func TestGetZone_Success(t *testing.T) {
 	const zoneID = "zone123"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, cfOK(map[string]any{"id": zoneID, "name": "example.com"}))
+		_, _ = fmt.Fprint(w, cfOK(map[string]any{"id": zoneID, "name": "example.com"}))
 	}))
 	defer srv.Close()
 
@@ -167,7 +167,7 @@ func TestGetZone_Success(t *testing.T) {
 func TestGetZone_APIError_ReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, cfErr(7003, "could not route to zone"))
+		_, _ = fmt.Fprint(w, cfErr(7003, "could not route to zone"))
 	}))
 	defer srv.Close()
 

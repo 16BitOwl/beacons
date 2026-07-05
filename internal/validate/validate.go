@@ -119,7 +119,7 @@ func walkMap(rv reflect.Value, path string) ValidationErrors {
 		if mv.Kind() == reflect.Interface {
 			mv = mv.Elem()
 		}
-		if mv.Kind() == reflect.Ptr {
+		if mv.Kind() == reflect.Pointer {
 			if mv.IsNil() {
 				continue
 			}
@@ -141,7 +141,7 @@ func walkSlice(rv reflect.Value, path string) ValidationErrors {
 	for i := range rv.Len() {
 		seg := path + "[" + itoa(i) + "]"
 		sv := rv.Index(i)
-		if sv.Kind() == reflect.Ptr {
+		if sv.Kind() == reflect.Pointer {
 			if sv.IsNil() {
 				continue
 			}

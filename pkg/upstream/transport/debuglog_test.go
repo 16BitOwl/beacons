@@ -127,7 +127,7 @@ func TestDebugLog_RevealSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if out := logs.String(); !strings.Contains(out, token) {
 		t.Errorf("log output should contain the raw token with RevealSecrets:\n%s", out)
