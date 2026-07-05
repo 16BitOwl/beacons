@@ -58,6 +58,7 @@ The HTTP endpoints are only available if the HTTP server is configured to run. S
 |------|-------------|
 | `GET /healthz` | Returns `{"status":"ok","records":<n>}` or 503 |
 | `GET /metrics` | Prometheus metrics |
+| `GET /state`   | Returns the full store state as JSON |
 
 ### Application metrics
 

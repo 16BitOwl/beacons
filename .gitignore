@@ -40,3 +40,8 @@ beacons.yaml
 
 # Notes
 notes/
+
+# LLMs and agents
+skills-lock.json
+.kiro
+.kilocode
