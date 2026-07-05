@@ -49,9 +49,9 @@ func New(opts Options) *Server {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", s.handleHealth)
-	mux.HandleFunc("/state", requireAuth(auth, s.handleState))
-	mux.Handle("/metrics", promhttp.HandlerFor(opts.Gatherer, promhttp.HandlerOpts{}))
+	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /state", requireAuth(auth, s.handleState))
+	mux.Handle("GET /metrics", promhttp.HandlerFor(opts.Gatherer, promhttp.HandlerOpts{}))
 	s.handler = mux
 
 	return s

@@ -68,9 +68,14 @@ func walkStruct(v reflect.Value, path string, env map[string]string) {
 				prev := fv.Interface()
 				setScalar(fv, val, fieldPath)
 				if reflect.DeepEqual(prev, reflect.Zero(fv.Type()).Interface()) {
-					slog.Debug("config set from env", "key", fieldPath, "value", fv.Interface())
+					slog.Debug("config set from env",
+						"key", fieldPath,
+						"value", fv.Interface())
 				} else if !reflect.DeepEqual(prev, fv.Interface()) {
-					slog.Debug("config overridden by env", "key", fieldPath, "old", prev, "new", fv.Interface())
+					slog.Debug("config overridden by env",
+						"key", fieldPath,
+						"old", prev,
+						"new", fv.Interface())
 				}
 			}
 		}
