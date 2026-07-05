@@ -29,6 +29,18 @@ type Config struct {
 	// HTTP configures the built-in HTTP server (healthz + metrics).
 	// Leave Addr empty to disable the server entirely.
 	HTTP HTTPConfig `yaml:"http"`
+
+	// Log controls logging behaviour.
+	Log LogConfig `yaml:"log"`
+}
+
+// LogConfig controls logging behaviour.
+type LogConfig struct {
+	// RevealValues includes env-override values in debug logs, which otherwise
+	// log keys only. Those values might be secrets (API tokens, passwords), so it
+	// defaults to false. Dev-only; must be set in the config file since it governs
+	// the env-overlay logging itself. Also requires debug-level logging.
+	RevealValues bool `yaml:"reveal_values"`
 }
 
 // HTTPConfig controls the built-in HTTP server.
@@ -159,7 +171,7 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	overlayEnv(&cfg)
+	overlayEnv(&cfg, cfg.Log.RevealValues)
 
 	if err := validate.Struct(&cfg); err != nil {
 		return nil, err

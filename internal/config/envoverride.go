@@ -19,14 +19,16 @@ const envPrefix = "BEACONS"
 //   - Dynamic map keys are wrapped in double underscores:
 //     BEACONS_UPSTREAMS__CF_ZONE_A__TYPE
 //     where CF_ZONE_A is the map key (hyphens represented as single underscores)
-func overlayEnv(v any) {
+// revealValues controls whether overridden values (which might be secrets) are
+// included in the debug logs; when false only the key is logged.
+func overlayEnv(v any, revealValues bool) {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Ptr || rv.Elem().Kind() != reflect.Struct {
 		return
 	}
 	// Build an index of all BEACONS_ env vars once for the whole walk.
 	env := collectEnv(envPrefix + "_")
-	walkStruct(rv.Elem(), envPrefix, env)
+	walkStruct(rv.Elem(), envPrefix, env, revealValues)
 }
 
 // collectEnv returns all env vars whose key starts with prefix, as a map of key→value.
@@ -41,7 +43,7 @@ func collectEnv(prefix string) map[string]string {
 	return m
 }
 
-func walkStruct(v reflect.Value, path string, env map[string]string) {
+func walkStruct(v reflect.Value, path string, env map[string]string, revealValues bool) {
 	t := v.Type()
 	for i := range t.NumField() {
 		field := t.Field(i)
@@ -60,25 +62,36 @@ func walkStruct(v reflect.Value, path string, env map[string]string) {
 
 		switch fv.Kind() {
 		case reflect.Struct:
-			walkStruct(fv, fieldPath, env)
+			walkStruct(fv, fieldPath, env, revealValues)
 		case reflect.Map:
-			walkMap(fv, fieldPath, env)
+			walkMap(fv, fieldPath, env, revealValues)
 		default:
 			if val, ok := env[fieldPath]; ok && val != "" {
 				prev := fv.Interface()
 				setScalar(fv, val, fieldPath)
-				if reflect.DeepEqual(prev, reflect.Zero(fv.Type()).Interface()) {
-					slog.Debug("config set from env",
-						"key", fieldPath,
-						"value", fv.Interface())
-				} else if !reflect.DeepEqual(prev, fv.Interface()) {
-					slog.Debug("config overridden by env",
-						"key", fieldPath,
-						"old", prev,
-						"new", fv.Interface())
-				}
+				logEnvOverride(fieldPath, prev, fv.Interface(), fv.Type(), revealValues)
 			}
 		}
+	}
+}
+
+// logEnvOverride records that a field was set or changed by an env var. Values
+// might be secrets, so they are only logged when revealValues is set; otherwise
+// just the key is logged.
+func logEnvOverride(key string, prev, cur any, t reflect.Type, revealValues bool) {
+	switch {
+	case reflect.DeepEqual(prev, reflect.Zero(t).Interface()):
+		attrs := []any{"key", key}
+		if revealValues {
+			attrs = append(attrs, "value", cur)
+		}
+		slog.Debug("config set from env", attrs...)
+	case !reflect.DeepEqual(prev, cur):
+		attrs := []any{"key", key}
+		if revealValues {
+			attrs = append(attrs, "old", prev, "new", cur)
+		}
+		slog.Debug("config overridden by env", attrs...)
 	}
 }
 
@@ -86,7 +99,7 @@ func walkStruct(v reflect.Value, path string, env map[string]string) {
 // Map keys in env vars are wrapped in double underscores: PATH__MAP_KEY__FIELD
 // e.g. BEACONS_UPSTREAMS__CF_ZONE_A__TYPE where CF_ZONE_A → cf-zone-a (matched
 // against existing keys) or cf_zone_a (as a new key).
-func walkMap(mv reflect.Value, path string, env map[string]string) {
+func walkMap(mv reflect.Value, path string, env map[string]string, revealValues bool) {
 	if mv.IsNil() {
 		mv.Set(reflect.MakeMap(mv.Type()))
 	}
@@ -122,7 +135,7 @@ func walkMap(mv reflect.Value, path string, env map[string]string) {
 			elem.Set(entry)
 		}
 		entryPath := prefix + token + "__"
-		walkStruct(elem, entryPath, env)
+		walkStruct(elem, entryPath, env, revealValues)
 		mv.SetMapIndex(reflect.ValueOf(mapKey), elem)
 	}
 }
