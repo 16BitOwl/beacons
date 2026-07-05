@@ -1,11 +1,14 @@
 package yaml
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/16bitowl/beacons/internal/model"
+	"github.com/16bitowl/beacons/pkg/source"
 )
 
 // writeYAML writes content to a temp file and returns its path.
@@ -444,4 +447,110 @@ func TestGlobDirs_NoMatchReturnsEmpty(t *testing.T) {
 	if len(dirs) != 0 {
 		t.Errorf("expected empty dirs, got %d", len(dirs))
 	}
+}
+
+// ---------------------------------------------------------------------------
+// staticGlobDir / hasMeta
+// ---------------------------------------------------------------------------
+
+func TestStaticGlobDir(t *testing.T) {
+	cases := []struct {
+		name string
+		glob string
+		want string
+	}{
+		{"single wildcard component", "/etc/beacons/*.yaml", "/etc/beacons"},
+		{"wildcard directory component", "/etc/beacons/*/site.yaml", "/etc/beacons"},
+		{"multiple wildcard components", "/etc/beacons/*/*.yaml", "/etc/beacons"},
+		{"no metacharacters", "/etc/beacons/site.yaml", "/etc/beacons"},
+		{"relative glob, no dir", "*.yaml", "."},
+		{"character class", "/data/[ab]/*.yaml", "/data"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := staticGlobDir(tc.glob); got != tc.want {
+				t.Errorf("staticGlobDir(%q) = %q, want %q", tc.glob, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHasMeta(t *testing.T) {
+	cases := []struct {
+		s    string
+		want bool
+	}{
+		{"/etc/beacons", false},
+		{"/etc/beacons/*", true},
+		{"/etc/beacons/?", true},
+		{"/etc/beacons/[a]", true},
+	}
+	for _, tc := range cases {
+		if got := hasMeta(tc.s); got != tc.want {
+			t.Errorf("hasMeta(%q) = %v, want %v", tc.s, got, tc.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Run: watcher fallback when nothing matches at startup
+// ---------------------------------------------------------------------------
+
+func TestRun_WatchesForNewFilesWhenNoneMatchAtStartup(t *testing.T) {
+	dir := t.TempDir()
+	glob := filepath.Join(dir, "*.yaml")
+	s := New(Options{Name: "src", Glob: glob})
+
+	ch := make(chan source.Event, 10)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx, ch) }()
+	defer func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("Run: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Error("Run did not exit after context cancel")
+		}
+	}()
+
+	// Initial sync: no files match yet.
+	select {
+	case ev := <-ch:
+		if len(ev.Records) != 0 {
+			t.Fatalf("initial sync: got %d records, want 0", len(ev.Records))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial sync")
+	}
+
+	content := `
+records:
+  web:
+    cf:
+      type: A
+      name: web.example.com
+      value: 1.2.3.4
+`
+	path := filepath.Join(dir, "new.yaml")
+
+	// Write repeatedly until the watcher (added despite the empty initial
+	// match set) picks up the new file; guards against a race with watcher.Add.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		select {
+		case ev := <-ch:
+			if len(ev.Records) == 1 {
+				return
+			}
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	t.Fatal("expected new file to be picked up by watcher after empty startup")
 }

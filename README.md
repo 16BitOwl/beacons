@@ -99,6 +99,8 @@ make lint         # run golangci-lint (must be installed separately)
 make test         # run tests
 ```
 
+A [Bruno](https://www.usebruno.com/) collection for the HTTP endpoints lives in `./bruno`. Open it in Bruno, select the `Local` environment, and set `api_key_value` to match your `http.auth.api_key`.
+
 Create an issue on Github before starting any work that you wish to merge into this project. Any PR:s without a relevant issue will be ignored.
 
 When adding a new upstream or source, implement the relevant interface in `pkg/upstream` or `pkg/source` respectively and register it in `cmd/beacons/main.go`. Keep new config fields in the appropriate struct in `internal/config` and document them in `beacons.example.yaml`.
