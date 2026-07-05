@@ -44,7 +44,8 @@ func (o RetryOptions) withDefaults() RetryOptions {
 // backoff and ±25% jitter.
 //
 // Retried conditions: network errors, HTTP 429, 500, 502, 503, 504.
-// On HTTP 429, the Retry-After response header is honoured if present.
+// On HTTP 429, the Retry-After response header is honoured if present, capped
+// at MaxDelay.
 // Errors wrapping [ErrAuthFailed] are permanent and never retried.
 //
 // Requests with a non-resettable body (GetBody == nil) are not retried after
@@ -131,12 +132,17 @@ func isRetryable(code int) bool {
 }
 
 // calcDelay returns the backoff duration for a given attempt (1-based).
-// It honours the Retry-After header on 429 responses when available.
+// It honours the Retry-After header on 429 responses when available, capped at
+// opts.MaxDelay.
 func calcDelay(attempt int, resp *http.Response, opts RetryOptions) time.Duration {
 	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
 		if ra := resp.Header.Get("Retry-After"); ra != "" {
+			// Clamp to MaxDelay: a hostile/huge Retry-After must not stall the syncer.
 			if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
-				return time.Duration(secs) * time.Second
+				if d := time.Duration(secs) * time.Second; d < opts.MaxDelay {
+					return d
+				}
+				return opts.MaxDelay
 			}
 		}
 	}

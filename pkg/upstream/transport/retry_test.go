@@ -303,6 +303,21 @@ func TestCalcDelay_RetryAfterHeader_HonouredOn429(t *testing.T) {
 	}
 }
 
+func TestCalcDelay_RetryAfterHeader_CappedAtMaxDelay(t *testing.T) {
+	// A hostile/huge Retry-After must not stall the syncer past MaxDelay.
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Retry-After": []string{"86400"}},
+	}
+	opts := RetryOptions{BaseDelay: time.Millisecond, MaxDelay: 30 * time.Second}
+
+	d := calcDelay(1, resp, opts)
+
+	if d != opts.MaxDelay {
+		t.Errorf("delay = %v, want %v (clamped)", d, opts.MaxDelay)
+	}
+}
+
 func TestCalcDelay_RetryAfterHeader_IgnoredOnNon429(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: http.StatusInternalServerError,
