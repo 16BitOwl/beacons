@@ -23,15 +23,35 @@ type Server struct {
 	handler http.Handler
 }
 
-// New creates a Server. gatherer is used to serve /metrics (typically a
-// *prometheus.Registry). store is used by /healthz to verify liveness.
-func New(addr string, store registry.Store, gatherer prometheus.Gatherer) *Server {
-	s := &Server{addr: addr, store: store}
+// Options configures a Server.
+type Options struct {
+	// Addr is the TCP address to listen on, e.g. ":9090".
+	Addr string
+
+	// Store backs /healthz and /state.
+	Store registry.Store
+
+	// Gatherer is used to serve /metrics (typically a *prometheus.Registry).
+	Gatherer prometheus.Gatherer
+
+	// Auth authenticates requests to protected endpoints (currently /state).
+	// Nil allows all requests.
+	Auth Authenticator
+}
+
+// New creates a Server from opts.
+func New(opts Options) *Server {
+	s := &Server{addr: opts.Addr, store: opts.Store}
+
+	auth := opts.Auth
+	if auth == nil {
+		auth = noAuth{}
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
-	mux.HandleFunc("/state", s.handleState)
-	mux.Handle("/metrics", promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{}))
+	mux.HandleFunc("/state", requireAuth(auth, s.handleState))
+	mux.Handle("/metrics", promhttp.HandlerFor(opts.Gatherer, promhttp.HandlerOpts{}))
 	s.handler = mux
 
 	return s
@@ -102,7 +122,7 @@ type stateResponse struct {
 }
 
 // handleState returns the full current state as JSON, independent of the
-// backing store type. It is unauthenticated; intended for local use only.
+// backing store type. Protected by the server's configured Authenticator.
 func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 	records, err := s.store.List()
 	if err != nil {

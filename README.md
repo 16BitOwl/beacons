@@ -58,7 +58,16 @@ The HTTP endpoints are only available if the HTTP server is configured to run. S
 |------|-------------|
 | `GET /healthz` | Returns `{"status":"ok","records":<n>}` or 503 |
 | `GET /metrics` | Prometheus metrics |
-| `GET /state`   | Returns the full store state as JSON |
+| `GET /state`   | Returns the full store state as JSON. Requires auth, see below |
+
+### Authentication
+
+`/state` dumps every managed hostname, IP, and upstream — `http.auth.type` controls who can read it. `/healthz` and `/metrics` are always open.
+
+- `api_key` (default): send the shared secret in the `X-API-Key` header. Set `http.auth.api_key` in config; if left empty, beacons generates a random key on startup, logs a warning, and prints it to stdout (it changes on every restart, so set it explicitly for anything beyond local testing).
+- `none`: disables auth on `/state`. Only use this behind a trusted network boundary.
+
+The auth method is pluggable, so other schemes can be added later without changing `/state` itself.
 
 ### Application metrics
 
