@@ -398,6 +398,45 @@ func TestHandleSync_RemovesOrphanedRecords(t *testing.T) {
 	}
 }
 
+func TestHandleSync_RenamedRecordWithinSameSource_RemovesOld(t *testing.T) {
+	store := newMockStore()
+	up := newMockUpstream("cf")
+	s := newSyncer(store, map[string]*mockUpstream{"cf": up})
+
+	// A YAML file (single SourceID) previously produced record "web".
+	old := makeRecord("/config/svc.yaml", "web", "cf")
+	old.SourceName = "yaml"
+	_ = store.Upsert(old)
+
+	// The file is reloaded with the record key renamed to "web2" — same file,
+	// same upstream, everything else unchanged.
+	renamed := makeRecord("/config/svc.yaml", "web2", "cf")
+	renamed.SourceName = "yaml"
+	ev := source.Event{
+		Type:       source.EventSync,
+		SourceName: "yaml",
+		Records:    []model.Record{renamed},
+	}
+	s.handleSync(context.Background(), ev)
+
+	// Old record must be deleted from the upstream despite sharing the SourceID.
+	if len(up.deleteCalls) != 1 {
+		t.Fatalf("upstream.Delete call count = %d, want 1 (renamed-away 'web')", len(up.deleteCalls))
+	}
+	if up.deleteCalls[0].ID != "web" {
+		t.Errorf("deleted record ID = %q, want web", up.deleteCalls[0].ID)
+	}
+
+	// Store should hold only the renamed record.
+	records, _ := store.List()
+	if len(records) != 1 {
+		t.Fatalf("store len = %d, want 1", len(records))
+	}
+	if records[0].ID != "web2" {
+		t.Errorf("remaining record ID = %q, want web2", records[0].ID)
+	}
+}
+
 func TestHandleSync_OrphanUpstreamFailure_MarkedAsPendingDelete(t *testing.T) {
 	store := newMockStore()
 	up := newMockUpstream("cf")
