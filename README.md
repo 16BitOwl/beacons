@@ -4,6 +4,9 @@ Beacons watches Docker containers and static YAML files for DNS record definitio
 
 ## Running with Docker Compose
 
+> [!CAUTION]
+> Beacons is still in a heavy development phase and as such might come with breaking changes between versions, even minor. Be sure to read the changelogs carefully before updating and do not use for critical workloads for now.
+
 Images are available on both Docker hub (`16bitowl/beacons:<tag>`) or on Github Container Registry (`ghcr.io/16bitowl/beacons:<tag>`).
 
 Quick start:
@@ -41,13 +44,25 @@ Environment variables follow the pattern `BEACONS_<YAML_PATH>`, e.g. `BEACONS_SY
 
 ## Docker labels
 
-```
+```yaml
 dns.enable: "true"
 dns.ttl: "300"
 dns.<id>.<upstream>.type: "A"
 dns.<id>.<upstream>.name: "host.example.com"
 dns.<id>.<upstream>.value: "1.2.3.4"
 dns.<id>.<upstream>.comment: "Managed by Beacons"
+```
+
+## Static YAML records
+
+```yaml
+records:
+    <id>:
+        <upstream>:
+            type: "A"
+            name: "host.example.com"
+            value: "1.2.3.4"
+            comment: "Managed by Beacons"
 ```
 
 ## HTTP endpoints

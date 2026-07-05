@@ -54,6 +54,8 @@ jobs:
           images: |
             ${{ env.GHCR_IMAGE }}
             ${{ env.DOCKERHUB_IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
 
       - name: Build and push by digest
         id: build
@@ -62,6 +64,9 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           push: false
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            BUILDTIME=${{ github.event.release.published_at }}
           outputs: 'type=image,"name=${{ env.GHCR_IMAGE }},${{ env.DOCKERHUB_IMAGE }}",push-by-digest=true,name-canonical=true,push=true'
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

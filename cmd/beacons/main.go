@@ -29,11 +29,23 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// version and buildTime are set via -ldflags at build time.
+var (
+	version   = "dev"
+	buildTime = "unknown"
+)
+
 func main() {
 	cfgPath := flag.String("config", "beacons.yaml", "path to config file")
 	doHealthcheck := flag.Bool("healthcheck", false, "hit /healthz and exit 0/1 (for use as Docker HEALTHCHECK)")
 	healthAddr := flag.String("healthcheck-addr", "http://localhost:9090", "base URL for -healthcheck")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("%s (built %s)\n", version, buildTime)
+		os.Exit(0)
+	}
 
 	initLogger()
 
@@ -123,6 +135,8 @@ func main() {
 	})
 
 	slog.Info("beacons starting",
+		"version", version,
+		"build_time", buildTime,
 		"sources", len(sources),
 		"upstreams", len(upstreams),
 		"store", cfg.Store.Type,
