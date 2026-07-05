@@ -17,6 +17,9 @@ import (
 
 const labelPrefix = "dns."
 
+// eventResubscribeDelay is how long to wait before reopening a dead event stream.
+const eventResubscribeDelay = 5 * time.Second
+
 // Options configures a Docker source adapter.
 type Options struct {
 	Name             string
@@ -41,7 +44,8 @@ type Source struct {
 
 // New creates a new Docker source adapter.
 func New(opts Options) (*Source, error) {
-	clientOpts := []dockerclient.Opt{}
+	// FromEnv honours DOCKER_HOST et al; an explicit host in config wins.
+	clientOpts := []dockerclient.Opt{dockerclient.FromEnv}
 	if opts.Host != "" {
 		clientOpts = append(clientOpts, dockerclient.WithHost(opts.Host))
 	}
@@ -84,11 +88,15 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 	}
 
 	var eventsResult dockerclient.EventsResult
+	var resubC <-chan time.Time
+	subscribe := func() {
+		f := make(dockerclient.Filters).Add("type", "container")
+		eventsResult = s.client.Events(ctx, dockerclient.EventsListOptions{Filters: f})
+	}
 	if s.useEvents {
 		slog.Info("docker event watching enabled",
 			"source", s.name)
-		f := make(dockerclient.Filters).Add("type", "container")
-		eventsResult = s.client.Events(ctx, dockerclient.EventsListOptions{Filters: f})
+		subscribe()
 	}
 
 	// debounce state: per-container pending timer and generation counter.
@@ -112,8 +120,24 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 		case <-ctx.Done():
 			return nil
 		case err := <-eventsResult.Err:
-			if err != nil {
-				slog.Error("docker event stream error",
+			// The client sends at most one error and closes Err; the stream
+			// is dead either way. Drop the channels and schedule a reopen so
+			// a closed channel can't spin the loop.
+			eventsResult = dockerclient.EventsResult{}
+			if ctx.Err() != nil {
+				continue
+			}
+			slog.Error("docker event stream lost, resubscribing",
+				"source", s.name,
+				"retry_in", eventResubscribeDelay,
+				"err", err)
+			resubC = time.After(eventResubscribeDelay)
+		case <-resubC:
+			resubC = nil
+			subscribe()
+			// Full poll to reconcile anything missed while the stream was down.
+			if err := s.poll(ctx, ch); err != nil {
+				slog.Error("docker resync poll failed",
 					"source", s.name,
 					"err", err)
 			}
