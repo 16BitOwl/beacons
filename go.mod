@@ -1,6 +1,6 @@
 module github.com/16bitowl/beacons
 
-go 1.26.3
+go 1.26
 
 require (
 	github.com/fsnotify/fsnotify v1.8.0

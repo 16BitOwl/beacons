@@ -1,0 +1,21 @@
+# golangci-lint v2 config. Start from the standard linter set (errcheck, govet,
+# ineffassign, staticcheck, unused) plus low-noise additions, and enforce gofmt.
+# Expand as tech debt is paid down — e.g. add `bodyclose` once the open
+# response-body issues (cloudflare doRaw, pihole drains) from the 2026-07-05
+# review are fixed.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - misspell
+  settings:
+    misspell:
+      locale: US
+
+formatters:
+  enable:
+    - gofmt
