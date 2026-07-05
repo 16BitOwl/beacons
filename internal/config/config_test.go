@@ -68,7 +68,7 @@ func TestStaticFieldsSetFromEnv(t *testing.T) {
 // values already loaded from a YAML file.
 func TestStaticFieldsOverriddenByEnv(t *testing.T) {
 	setenv(t, map[string]string{
-		"BEACONS_DEFAULTS_TTL":      "600",
+		"BEACONS_DEFAULTS_TTL":       "600",
 		"BEACONS_SYNC_POLL_INTERVAL": "120",
 	})
 

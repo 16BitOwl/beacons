@@ -305,7 +305,7 @@ func (u *Upstream) authenticate(ctx context.Context) (transport.Session, error) 
 	if err != nil {
 		return transport.Session{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var ar authResponse
 	if err := json.NewDecoder(resp.Body).Decode(&ar); err != nil {
@@ -341,7 +341,7 @@ func (u *Upstream) get(ctx context.Context, path string, dst any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("pihole: GET %s returned %d", path, resp.StatusCode)
 	}
@@ -365,7 +365,7 @@ func (u *Upstream) patch(ctx context.Context, payload any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		var errBody map[string]any
 		_ = json.NewDecoder(resp.Body).Decode(&errBody)
