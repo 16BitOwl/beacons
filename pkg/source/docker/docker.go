@@ -4,18 +4,36 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/16bitowl/beacons/internal/model"
+	"github.com/16bitowl/beacons/internal/netutil"
 	"github.com/16bitowl/beacons/internal/validate"
 	"github.com/16bitowl/beacons/pkg/source"
 	dockerevents "github.com/moby/moby/api/types/events"
+	"github.com/moby/moby/api/types/network"
 	dockerclient "github.com/moby/moby/client"
 )
 
 const labelPrefix = "dns."
+
+// Special tokens recognised in a record's "value" field. Each is re-resolved
+// on every label parse (poll or container-start event), so the record tracks
+// address changes over time rather than being fixed at container creation.
+const (
+	// nodeIPToken resolves to the outbound-facing local IP of the host
+	// Beacons' process runs on (see internal/netutil.LocalIP).
+	nodeIPToken = "__NODE_IP__"
+	// containerIPToken resolves to the labelled container's own IP address.
+	containerIPToken = "__CONTAINER_IP__"
+	// publicIPToken resolves to this host's public, ISP-assigned IP address
+	// (see internal/netutil.PublicIP). Backed by a short-lived cache since,
+	// unlike the other two tokens, resolving it costs a real network call.
+	publicIPToken = "__PUBLIC_IP__"
+)
 
 // Options configures a Docker source adapter.
 type Options struct {
@@ -169,7 +187,18 @@ func (s *Source) poll(ctx context.Context, ch chan<- source.Event) error {
 
 	var records []model.Record
 	for _, c := range listed.Items {
-		recs, err := parseLabels(s.name, c.ID, c.Labels, s.defaults, s.strictValidation)
+		var containerIP string
+		if c.NetworkSettings != nil {
+			containerIP = primaryContainerIP(c.NetworkSettings.Networks)
+		}
+		recs, err := parseLabels(ctx, parseLabelsOpts{
+			SourceName:       s.name,
+			ContainerID:      c.ID,
+			ContainerIP:      containerIP,
+			Labels:           c.Labels,
+			Defaults:         s.defaults,
+			StrictValidation: s.strictValidation,
+		})
 		if err != nil {
 			slog.Error("docker label validation failed",
 				"source", s.name,
@@ -214,7 +243,18 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 				"err", err)
 			return
 		}
-		records, err := parseLabels(s.name, result.Container.ID, result.Container.Config.Labels, s.defaults, s.strictValidation)
+		var containerIP string
+		if result.Container.NetworkSettings != nil {
+			containerIP = primaryContainerIP(result.Container.NetworkSettings.Networks)
+		}
+		records, err := parseLabels(ctx, parseLabelsOpts{
+			SourceName:       s.name,
+			ContainerID:      result.Container.ID,
+			ContainerIP:      containerIP,
+			Labels:           result.Container.Config.Labels,
+			Defaults:         s.defaults,
+			StrictValidation: s.strictValidation,
+		})
 		if err != nil {
 			slog.Error("docker label validation failed",
 				"source", s.name,
@@ -251,6 +291,19 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 	}
 }
 
+// parseLabelsOpts groups the inputs needed to parse DNS records from a single
+// container's Docker labels.
+type parseLabelsOpts struct {
+	SourceName  string
+	ContainerID string
+	// ContainerIP is the container's own resolved network IP, used to expand
+	// containerIPToken. Empty if the container has no assigned address yet.
+	ContainerIP      string
+	Labels           map[string]string
+	Defaults         model.BaseRecord
+	StrictValidation bool
+}
+
 // parseLabels extracts DNS records from Docker labels following the schema:
 //
 //	dns.enable=true
@@ -259,13 +312,21 @@ func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch c
 //	dns.<record-id>.<upstream>.type=...
 //	dns.<record-id>.<upstream>.value=...
 //	dns.<record-id>.<upstream>.ttl=...   (overrides base)
-func parseLabels(sourceName, containerID string, labels map[string]string, defaults model.BaseRecord, strictValidation bool) ([]model.Record, error) {
+//
+// The value field additionally supports three tokens, re-resolved on every
+// call so records track address changes over time:
+//
+//	__NODE_IP__       outbound-facing local IP of the host Beacons runs on
+//	__CONTAINER_IP__  the labelled container's own IP address
+//	__PUBLIC_IP__     this host's public, ISP-assigned IP address
+func parseLabels(ctx context.Context, opts parseLabelsOpts) ([]model.Record, error) {
+	labels := opts.Labels
 	if labels[labelPrefix+"enable"] != "true" {
 		return nil, nil
 	}
 
 	// Parse base TTL override from labels.
-	base := defaults
+	base := opts.Defaults
 	if v, ok := labels[labelPrefix+"ttl"]; ok {
 		if n, err := strconv.Atoi(v); err == nil {
 			base.TTL = n
@@ -298,15 +359,26 @@ func parseLabels(sourceName, containerID string, labels map[string]string, defau
 	var records []model.Record
 	for recordID, upstreams := range raw {
 		for upstreamName, fields := range upstreams {
+			value, err := expandValueTokens(ctx, fields["value"], opts.ContainerIP)
+			if err != nil {
+				slog.Warn("dns record value token expansion failed, skipping",
+					"source", opts.SourceName,
+					"container", shortID(opts.ContainerID),
+					"record", recordID,
+					"upstream", upstreamName,
+					"err", err)
+				continue
+			}
+
 			r := model.Record{
 				BaseRecord: base,
 				ID:         recordID,
-				SourceID:   containerID,
-				SourceName: sourceName,
+				SourceID:   opts.ContainerID,
+				SourceName: opts.SourceName,
 				Upstream:   upstreamName,
 				Type:       model.RecordType(strings.ToUpper(fields["type"])),
 				Name:       fields["name"],
-				Value:      fields["value"],
+				Value:      value,
 			}
 			if v, ok := fields["ttl"]; ok {
 				if n, err := strconv.Atoi(v); err == nil {
@@ -322,9 +394,9 @@ func parseLabels(sourceName, containerID string, labels map[string]string, defau
 				r.Comment = v
 			}
 
-			path := fmt.Sprintf("docker://%s/%s/%s", shortID(containerID), recordID, upstreamName)
+			path := fmt.Sprintf("docker://%s/%s/%s", shortID(opts.ContainerID), recordID, upstreamName)
 			if err := validate.StructWithPrefix(&r, path); err != nil {
-				if strictValidation {
+				if opts.StrictValidation {
 					return nil, err
 				}
 				slog.Warn("invalid docker label record, skipping",
@@ -337,6 +409,59 @@ func parseLabels(sourceName, containerID string, labels map[string]string, defau
 		}
 	}
 	return records, nil
+}
+
+// expandValueTokens replaces nodeIPToken, containerIPToken, and
+// publicIPToken in value with their currently resolved addresses.
+// containerIP is the labelled container's own IP, already resolved by the
+// caller from Docker's network settings; it may be empty if the container
+// has no address yet.
+func expandValueTokens(ctx context.Context, value, containerIP string) (string, error) {
+	if strings.Contains(value, containerIPToken) {
+		if containerIP == "" {
+			return "", fmt.Errorf("%s requested but container has no network IP yet", containerIPToken)
+		}
+		value = strings.ReplaceAll(value, containerIPToken, containerIP)
+	}
+	if strings.Contains(value, nodeIPToken) {
+		ip, err := netutil.LocalIP()
+		if err != nil {
+			return "", fmt.Errorf("resolving %s: %w", nodeIPToken, err)
+		}
+		value = strings.ReplaceAll(value, nodeIPToken, ip)
+	}
+	if strings.Contains(value, publicIPToken) {
+		ip, err := netutil.PublicIP(ctx)
+		if err != nil {
+			return "", fmt.Errorf("resolving %s: %w", publicIPToken, err)
+		}
+		value = strings.ReplaceAll(value, publicIPToken, ip)
+	}
+	return value, nil
+}
+
+// primaryContainerIP returns the first valid IP address across a container's
+// attached networks, chosen deterministically by sorting network names.
+// Returns "" if the container has no attached network with an assigned
+// address yet (e.g. it is still starting).
+func primaryContainerIP(networks map[string]*network.EndpointSettings) string {
+	if len(networks) == 0 {
+		return ""
+	}
+
+	names := make([]string, 0, len(networks))
+	for name := range networks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		ep := networks[name]
+		if ep != nil && ep.IPAddress.IsValid() {
+			return ep.IPAddress.String()
+		}
+	}
+	return ""
 }
 
 // uniqueSourceIDs counts distinct SourceIDs in a record slice.

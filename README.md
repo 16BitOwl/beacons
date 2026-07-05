@@ -50,6 +50,20 @@ dns.<id>.<upstream>.value: "1.2.3.4"
 dns.<id>.<upstream>.comment: "Managed by Beacons"
 ```
 
+The `value` field supports three special tokens, resolved fresh on every poll or container-start event so the record tracks address changes over time (kinda like DDNS):
+
+- `__NODE_IP__` — the outbound-facing local IP of the host Beacons' process runs on. If Beacons runs in a container, this is the container's own network namespace unless it uses `network_mode: host`.
+- `__CONTAINER_IP__` — the labelled container's own IP address, taken from its lowest-sorted attached Docker network.
+- `__PUBLIC_IP__` — this host's public, ISP-assigned IP address, as seen from outside your network. Looked up via a small set of external IP-echo services (`api.ipify.org`, `ifconfig.me`, `icanhazip.com`, tried in order) and cached for 5 minutes so Beacons doesn't hammer them.
+
+```
+dns.web.pihole-home.value: "__NODE_IP__"
+dns.web.pihole-home.value: "__CONTAINER_IP__"
+dns.web.pihole-home.value: "__PUBLIC_IP__"
+```
+
+If a token can't be resolved (e.g. `__CONTAINER_IP__` before the container has an assigned address, or `__PUBLIC_IP__` when all lookup services are unreachable), the record is skipped with a warning until the next poll or event.
+
 ## HTTP endpoints
 
 The HTTP endpoints are only available if the HTTP server is configured to run. Set `http.addr` in `beacons.yaml` to enable, see example configuration file. Omitting this value will disable the HTTP server and all endpoints.

@@ -1,10 +1,35 @@
 package docker
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/16bitowl/beacons/internal/model"
+	"github.com/16bitowl/beacons/internal/netutil"
 )
+
+// parseOpts is a small test helper that fills in the common parseLabelsOpts
+// fields so each test only needs to specify what it cares about.
+func parseOpts(labels map[string]string, defaults model.BaseRecord, strictValidation bool) parseLabelsOpts {
+	return parseLabelsOpts{
+		SourceName:       "src",
+		ContainerID:      "aabbccddeeff",
+		Labels:           labels,
+		Defaults:         defaults,
+		StrictValidation: strictValidation,
+	}
+}
+
+// stubPublicIP replaces netutil.PublicIP for the duration of the calling
+// test, so token-expansion tests don't depend on real network access.
+func stubPublicIP(t *testing.T, ip string, err error) {
+	t.Helper()
+	orig := netutil.PublicIP
+	netutil.PublicIP = func(context.Context) (string, error) { return ip, err }
+	t.Cleanup(func() { netutil.PublicIP = orig })
+}
 
 // ---------------------------------------------------------------------------
 // parseLabels
@@ -16,7 +41,7 @@ func TestParseLabels_NotEnabled_ReturnsNil(t *testing.T) {
 		"dns.web.cf.name":  "svc.example.com",
 		"dns.web.cf.value": "1.2.3.4",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -32,7 +57,7 @@ func TestParseLabels_EnableFalse_ReturnsNil(t *testing.T) {
 		"dns.web.cf.name":  "svc.example.com",
 		"dns.web.cf.value": "1.2.3.4",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -48,7 +73,9 @@ func TestParseLabels_SingleRecord(t *testing.T) {
 		"dns.web.cf.name":  "svc.example.com",
 		"dns.web.cf.value": "1.2.3.4",
 	}
-	records, err := parseLabels("src", "containerABC", labels, model.BaseRecord{}, false)
+	opts := parseOpts(labels, model.BaseRecord{}, false)
+	opts.ContainerID = "containerABC"
+	records, err := parseLabels(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -81,12 +108,12 @@ func TestParseLabels_SingleRecord(t *testing.T) {
 
 func TestParseLabels_TypeUppercased(t *testing.T) {
 	labels := map[string]string{
-		"dns.enable":          "true",
-		"dns.alias.cf.type":   "cname",
-		"dns.alias.cf.name":   "alias.example.com",
-		"dns.alias.cf.value":  "target.example.com",
+		"dns.enable":         "true",
+		"dns.alias.cf.type":  "cname",
+		"dns.alias.cf.name":  "alias.example.com",
+		"dns.alias.cf.value": "target.example.com",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -108,7 +135,7 @@ func TestParseLabels_MultipleRecordsAndUpstreams(t *testing.T) {
 		"dns.api.cf.name":      "api.example.com",
 		"dns.api.cf.value":     "5.6.7.8",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -124,7 +151,7 @@ func TestParseLabels_BaseTTLFromDefaults(t *testing.T) {
 		"dns.web.cf.name":  "web.example.com",
 		"dns.web.cf.value": "1.2.3.4",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{TTL: 300}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{TTL: 300}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -141,7 +168,7 @@ func TestParseLabels_BaseTTLOverriddenByLabel(t *testing.T) {
 		"dns.web.cf.name":  "web.example.com",
 		"dns.web.cf.value": "1.2.3.4",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{TTL: 300}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{TTL: 300}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -159,7 +186,7 @@ func TestParseLabels_PerRecordTTLOverride(t *testing.T) {
 		"dns.web.cf.ttl":     "7200",
 		"dns.web.cf.comment": "high ttl",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{TTL: 300}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{TTL: 300}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -173,13 +200,13 @@ func TestParseLabels_PerRecordTTLOverride(t *testing.T) {
 
 func TestParseLabels_PriorityLabel(t *testing.T) {
 	labels := map[string]string{
-		"dns.enable":            "true",
-		"dns.mail.cf.type":      "MX",
-		"dns.mail.cf.name":      "example.com",
-		"dns.mail.cf.value":     "mail.example.com",
-		"dns.mail.cf.priority":  "10",
+		"dns.enable":           "true",
+		"dns.mail.cf.type":     "MX",
+		"dns.mail.cf.name":     "example.com",
+		"dns.mail.cf.value":    "mail.example.com",
+		"dns.mail.cf.priority": "10",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -198,7 +225,7 @@ func TestParseLabels_InvalidRecordSkippedInLenientMode(t *testing.T) {
 		"dns.good.cf.name":  "good.example.com",
 		"dns.good.cf.value": "1.2.3.4",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
 	if err != nil {
 		t.Fatalf("unexpected error in lenient mode: %v", err)
 	}
@@ -214,7 +241,7 @@ func TestParseLabels_InvalidRecordErrorsInStrictMode(t *testing.T) {
 		"dns.bad.cf.name":  "",
 		"dns.bad.cf.value": "",
 	}
-	_, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, true)
+	_, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, true))
 	if err == nil {
 		t.Error("expected error in strict validation mode")
 	}
@@ -222,14 +249,14 @@ func TestParseLabels_InvalidRecordErrorsInStrictMode(t *testing.T) {
 
 func TestParseLabels_LabelsWithoutDNSPrefixIgnored(t *testing.T) {
 	labels := map[string]string{
-		"dns.enable":            "true",
-		"com.docker.compose.x":  "irrelevant",
-		"traefik.enable":        "true",
-		"dns.web.cf.type":       "A",
-		"dns.web.cf.name":       "web.example.com",
-		"dns.web.cf.value":      "1.2.3.4",
+		"dns.enable":           "true",
+		"com.docker.compose.x": "irrelevant",
+		"traefik.enable":       "true",
+		"dns.web.cf.type":      "A",
+		"dns.web.cf.name":      "web.example.com",
+		"dns.web.cf.value":     "1.2.3.4",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -246,7 +273,7 @@ func TestParseLabels_InvalidBaseTTLFallsBackToDefault(t *testing.T) {
 		"dns.web.cf.name":  "web.example.com",
 		"dns.web.cf.value": "1.2.3.4",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{TTL: 300}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{TTL: 300}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -263,7 +290,7 @@ func TestParseLabels_InvalidPerRecordTTLFallsBackToBase(t *testing.T) {
 		"dns.web.cf.value": "1.2.3.4",
 		"dns.web.cf.ttl":   "notanumber",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{TTL: 300}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{TTL: 300}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -280,7 +307,7 @@ func TestParseLabels_InvalidPriorityFallsBackToZero(t *testing.T) {
 		"dns.mail.cf.value":    "mail.example.com",
 		"dns.mail.cf.priority": "notanumber",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -293,7 +320,7 @@ func TestParseLabels_EnabledButNoRecordLabels(t *testing.T) {
 	labels := map[string]string{
 		"dns.enable": "true",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
@@ -305,18 +332,244 @@ func TestParseLabels_EnabledButNoRecordLabels(t *testing.T) {
 func TestParseLabels_MalformedLabelIgnored(t *testing.T) {
 	// Labels with fewer than 3 parts after the "dns." prefix are silently ignored.
 	labels := map[string]string{
-		"dns.enable":   "true",
-		"dns.tooshort": "value", // only 1 part — ignored
+		"dns.enable":       "true",
+		"dns.tooshort":     "value", // only 1 part — ignored
 		"dns.web.cf.type":  "A",
 		"dns.web.cf.name":  "web.example.com",
 		"dns.web.cf.value": "1.2.3.4",
 	}
-	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
 	if err != nil {
 		t.Fatalf("parseLabels: %v", err)
 	}
 	if len(records) != 1 {
 		t.Errorf("expected 1 record, got %d", len(records))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// parseLabels — __NODE_IP__ / __CONTAINER_IP__ / __PUBLIC_IP__ value tokens
+// ---------------------------------------------------------------------------
+
+func TestParseLabels_ContainerIPToken_Expanded(t *testing.T) {
+	labels := map[string]string{
+		"dns.enable":       "true",
+		"dns.web.cf.type":  "A",
+		"dns.web.cf.name":  "web.example.com",
+		"dns.web.cf.value": containerIPToken,
+	}
+	opts := parseOpts(labels, model.BaseRecord{}, false)
+	opts.ContainerIP = "172.18.0.5"
+	records, err := parseLabels(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("parseLabels: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len = %d, want 1", len(records))
+	}
+	if records[0].Value != "172.18.0.5" {
+		t.Errorf("Value = %q, want 172.18.0.5", records[0].Value)
+	}
+}
+
+func TestParseLabels_ContainerIPToken_MixedWithStaticText(t *testing.T) {
+	labels := map[string]string{
+		"dns.enable":       "true",
+		"dns.web.cf.type":  "TXT",
+		"dns.web.cf.name":  "web.example.com",
+		"dns.web.cf.value": "ip=" + containerIPToken,
+	}
+	opts := parseOpts(labels, model.BaseRecord{}, false)
+	opts.ContainerIP = "10.0.0.9"
+	records, err := parseLabels(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("parseLabels: %v", err)
+	}
+	if records[0].Value != "ip=10.0.0.9" {
+		t.Errorf("Value = %q, want ip=10.0.0.9", records[0].Value)
+	}
+}
+
+func TestParseLabels_ContainerIPToken_NoContainerIP_SkipsRecordInLenientMode(t *testing.T) {
+	labels := map[string]string{
+		"dns.enable":       "true",
+		"dns.web.cf.type":  "A",
+		"dns.web.cf.name":  "web.example.com",
+		"dns.web.cf.value": containerIPToken,
+	}
+	// opts.ContainerIP left empty — container has no assigned address yet.
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
+	if err != nil {
+		t.Fatalf("unexpected error in lenient mode: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("expected record to be skipped when container has no IP, got %d", len(records))
+	}
+}
+
+func TestParseLabels_NodeIPToken_Expanded(t *testing.T) {
+	labels := map[string]string{
+		"dns.enable":       "true",
+		"dns.web.cf.type":  "A",
+		"dns.web.cf.name":  "web.example.com",
+		"dns.web.cf.value": nodeIPToken,
+	}
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
+	if err != nil {
+		t.Fatalf("parseLabels: %v", err)
+	}
+	if len(records) == 0 {
+		// No routable network stack in this sandbox — a skip is preferable
+		// to failing on an environment limitation.
+		t.Skip("node IP resolution unavailable in this environment")
+	}
+	if strings.Contains(records[0].Value, nodeIPToken) {
+		t.Errorf("Value = %q, token was not expanded", records[0].Value)
+	}
+}
+
+func TestParseLabels_PublicIPToken_Expanded(t *testing.T) {
+	stubPublicIP(t, "203.0.113.42", nil)
+
+	labels := map[string]string{
+		"dns.enable":       "true",
+		"dns.web.cf.type":  "A",
+		"dns.web.cf.name":  "web.example.com",
+		"dns.web.cf.value": publicIPToken,
+	}
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
+	if err != nil {
+		t.Fatalf("parseLabels: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len = %d, want 1", len(records))
+	}
+	if records[0].Value != "203.0.113.42" {
+		t.Errorf("Value = %q, want 203.0.113.42", records[0].Value)
+	}
+}
+
+func TestParseLabels_PublicIPToken_LookupFails_SkipsRecordInLenientMode(t *testing.T) {
+	stubPublicIP(t, "", errors.New("all lookups failed"))
+
+	labels := map[string]string{
+		"dns.enable":       "true",
+		"dns.web.cf.type":  "A",
+		"dns.web.cf.name":  "web.example.com",
+		"dns.web.cf.value": publicIPToken,
+	}
+	records, err := parseLabels(context.Background(), parseOpts(labels, model.BaseRecord{}, false))
+	if err != nil {
+		t.Fatalf("unexpected error in lenient mode: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("expected record to be skipped when public ip lookup fails, got %d", len(records))
+	}
+}
+
+func TestParseLabels_NoTokensPresent_ValueUnchanged(t *testing.T) {
+	labels := map[string]string{
+		"dns.enable":       "true",
+		"dns.web.cf.type":  "A",
+		"dns.web.cf.name":  "web.example.com",
+		"dns.web.cf.value": "1.2.3.4",
+	}
+	opts := parseOpts(labels, model.BaseRecord{}, false)
+	opts.ContainerIP = "10.0.0.1"
+	records, err := parseLabels(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("parseLabels: %v", err)
+	}
+	if records[0].Value != "1.2.3.4" {
+		t.Errorf("Value = %q, want unchanged 1.2.3.4", records[0].Value)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// expandValueTokens
+// ---------------------------------------------------------------------------
+
+func TestExpandValueTokens_NoTokens_ReturnsUnchanged(t *testing.T) {
+	got, err := expandValueTokens(context.Background(), "1.2.3.4", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "1.2.3.4" {
+		t.Errorf("got %q, want 1.2.3.4", got)
+	}
+}
+
+func TestExpandValueTokens_ContainerIPToken(t *testing.T) {
+	got, err := expandValueTokens(context.Background(), containerIPToken, "192.168.1.50")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "192.168.1.50" {
+		t.Errorf("got %q, want 192.168.1.50", got)
+	}
+}
+
+func TestExpandValueTokens_ContainerIPToken_EmptyIP_Errors(t *testing.T) {
+	_, err := expandValueTokens(context.Background(), containerIPToken, "")
+	if err == nil {
+		t.Error("expected error when container has no IP")
+	}
+}
+
+func TestExpandValueTokens_NodeIPToken_Resolves(t *testing.T) {
+	got, err := expandValueTokens(context.Background(), nodeIPToken, "")
+	if err != nil {
+		t.Skipf("node IP resolution unavailable in this environment: %v", err)
+	}
+	if got == nodeIPToken {
+		t.Errorf("token was not expanded: %q", got)
+	}
+}
+
+func TestExpandValueTokens_PublicIPToken_Resolves(t *testing.T) {
+	stubPublicIP(t, "198.51.100.7", nil)
+
+	got, err := expandValueTokens(context.Background(), publicIPToken, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "198.51.100.7" {
+		t.Errorf("got %q, want 198.51.100.7", got)
+	}
+}
+
+func TestExpandValueTokens_PublicIPToken_LookupError_Propagates(t *testing.T) {
+	stubPublicIP(t, "", errors.New("boom"))
+
+	_, err := expandValueTokens(context.Background(), publicIPToken, "")
+	if err == nil {
+		t.Error("expected error when public ip lookup fails")
+	}
+}
+
+func TestExpandValueTokens_AllThreeTokensInOneValue(t *testing.T) {
+	stubPublicIP(t, "203.0.113.1", nil)
+
+	got, err := expandValueTokens(context.Background(),
+		containerIPToken+" "+nodeIPToken+" "+publicIPToken, "10.0.0.5")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(got, containerIPToken) || strings.Contains(got, publicIPToken) {
+		t.Errorf("tokens not fully expanded: %q", got)
+	}
+	if !strings.HasPrefix(got, "10.0.0.5 ") || !strings.HasSuffix(got, " 203.0.113.1") {
+		t.Errorf("got %q, want it to start with container IP and end with public IP", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// primaryContainerIP
+// ---------------------------------------------------------------------------
+
+func TestPrimaryContainerIP_NoNetworks_ReturnsEmpty(t *testing.T) {
+	if got := primaryContainerIP(nil); got != "" {
+		t.Errorf("got %q, want empty", got)
 	}
 }
 

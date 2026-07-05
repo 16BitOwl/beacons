@@ -5,6 +5,11 @@ services:
     image: 16bitowl/beacons:0
     container_name: beacons
     restart: unless-stopped
+    # network_mode: host                  # Uncomment so __NODE_IP__ labels resolve the server's
+                                           # real LAN IP instead of this container's bridge IP.
+                                           # Not needed for __CONTAINER_IP__ or __PUBLIC_IP__.
+                                           # If enabled, remove the "ports:" mapping below — host
+                                           # networking exposes the HTTP server directly.
     env_file:
       - .env                              # API tokens and passwords (see beacons.example.yaml)
     environment:
