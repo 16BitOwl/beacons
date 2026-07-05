@@ -60,13 +60,28 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 	}
 	defer watcher.Close()
 
-	// Watch the directories that match the glob pattern.
-	dirs, _ := globDirs(s.glob)
+	// Watch the directories that match the glob pattern. If nothing matches
+	// yet, fall back to the glob's static prefix so new files are still seen.
+	dirs, err := globDirs(s.glob)
+	if err != nil {
+		slog.Error("yaml glob dirs failed",
+			"source", s.name,
+			"glob", s.glob,
+			"err", err)
+	}
+	if len(dirs) == 0 {
+		dirs = []string{staticGlobDir(s.glob)}
+	}
 	for _, d := range dirs {
 		slog.Debug("yaml source watching directory",
 			"source", s.name,
 			"dir", d)
-		_ = watcher.Add(d)
+		if err := watcher.Add(d); err != nil {
+			slog.Error("yaml watcher add failed",
+				"source", s.name,
+				"dir", d,
+				"err", err)
+		}
 	}
 
 	for {
@@ -268,7 +283,25 @@ func mergeBase(base, override model.BaseRecord) model.BaseRecord {
 	return base
 }
 
-// globDirs returns unique directories from a glob pattern.
+// staticGlobDir returns the longest directory prefix of glob that contains
+// no pattern metacharacters, so it can be watched even before any file matches.
+func staticGlobDir(glob string) string {
+	dir := filepath.Dir(glob)
+	for hasMeta(dir) {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return dir
+}
+
+func hasMeta(s string) bool {
+	return strings.ContainsAny(s, "*?[")
+}
+
+// globDirs returns unique directories from a glob pattern's currently matched files.
 func globDirs(glob string) ([]string, error) {
 	files, err := filepath.Glob(glob)
 	if err != nil {
