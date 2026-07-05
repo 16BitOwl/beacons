@@ -38,6 +38,7 @@ data/
 
 # Local config (use beacons.example.yaml as a starting point)
 beacons.yaml
+config/dev.yaml
 
 # Notes
 notes/

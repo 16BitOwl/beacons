@@ -47,6 +47,10 @@ sync:
   dry_run: false      # set to true to log instead of apply
   strict_env: false   # set to true to fail on missing env vars
 
+# log:
+#   reveal_values: true # DEV ONLY: include env-override values (might be secrets)
+#                       # in debug logs; keys-only by default. Needs BEACONS_LOG_LEVEL=debug.
+
 # Sources define where DNS records come from. Each entry is a named instance —
 # the name is arbitrary but must be unique. You can define multiple sources of
 # the same type (e.g. two Docker hosts or multiple YAML globs).

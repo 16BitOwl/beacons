@@ -42,16 +42,6 @@ cp beacons.example.yaml beacons.yaml
 
 Environment variables follow the pattern `BEACONS_<YAML_PATH>`, e.g. `BEACONS_SYNC_DRY_RUN=true`. Map keys (upstreams, sources) use double-underscore delimiters: `BEACONS_UPSTREAMS__CF_ZONE_A__API_TOKEN`.
 
-### Debug logging
-
-Each upstream accepts two development-only flags under `http`, both of which also require `BEACONS_LOG_LEVEL=debug` to take effect:
-
-- `debug_log`: logs full request/response bodies for that upstream. Auth headers and tokens are redacted.
-- `debug_log_secrets`: disables that redaction and, for Pi-hole, also logs the authentication exchange.
-
-> [!WARNING]
-> `debug_log_secrets` writes API tokens and passwords to the logs in plaintext. Use it only for local troubleshooting, never in production or anywhere logs are shipped or retained.
-
 ## Docker labels
 
 ```yaml
@@ -129,3 +119,17 @@ A [Bruno](https://www.usebruno.com/) collection for the HTTP endpoints lives in 
 Create an issue on Github before starting any work that you wish to merge into this project. Any PR:s without a relevant issue will be ignored.
 
 When adding a new upstream or source, implement the relevant interface in `pkg/upstream` or `pkg/source` respectively and register it in `cmd/beacons/main.go`. Keep new config fields in the appropriate struct in `internal/config` and document them in `beacons.example.yaml`.
+
+### Debug logging
+
+Each upstream accepts two development-only flags under `http`, both of which also require `BEACONS_LOG_LEVEL=debug` to take effect:
+
+- `debug_log`: logs full request/response bodies for that upstream. Auth headers and tokens are redacted.
+- `debug_log_secrets`: disables that redaction and, for Pi-hole, also logs the authentication exchange.
+
+A separate top-level flag governs config logging:
+
+- `log.reveal_values`: when the config loader logs which values were set or overridden by `BEACONS_*` env vars, it logs keys only by default. Set this to include the values. Requires `BEACONS_LOG_LEVEL=debug`, and must be set in the config file (it governs the env-overlay logging itself, so it isn't env-overridable).
+
+> [!WARNING]
+> `debug_log_secrets` logs auth headers, and `log.reveal_values` logs env-override values — either might write API tokens or passwords to the logs in plaintext. Use them only for local troubleshooting, never in production or anywhere logs are shipped or retained.
