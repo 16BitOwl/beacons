@@ -81,9 +81,7 @@ func generateAPIKey() (string, error) {
 func requireAuth(auth Authenticator, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !auth.Authenticate(r) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"status":"unauthorized"}`))
+			writeJSONError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		h(w, r)
