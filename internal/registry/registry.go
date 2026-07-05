@@ -29,8 +29,3 @@ type Store interface {
 	// Used by the syncer to find orphaned records during an EventSync.
 	ListBySourceName(sourceName string) ([]model.Record, error)
 }
-
-// recordKey returns the stable storage key for a record.
-func recordKey(r model.Record) string {
-	return r.SourceID + "/" + r.ID + "/" + r.Upstream
-}

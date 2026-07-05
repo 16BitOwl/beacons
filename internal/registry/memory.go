@@ -20,7 +20,7 @@ func NewMemoryStore() *MemoryStore {
 func (m *MemoryStore) Upsert(r model.Record) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.records[recordKey(r)] = r
+	m.records[model.RecordKey(r)] = r
 	return nil
 }
 
@@ -38,7 +38,7 @@ func (m *MemoryStore) Delete(sourceID string) error {
 func (m *MemoryStore) DeleteRecord(r model.Record) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.records, recordKey(r))
+	delete(m.records, model.RecordKey(r))
 	return nil
 }
 

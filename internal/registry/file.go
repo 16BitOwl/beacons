@@ -29,7 +29,7 @@ func NewFileStore(path string) (*FileStore, error) {
 func (f *FileStore) Upsert(r model.Record) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.records[recordKey(r)] = r
+	f.records[model.RecordKey(r)] = r
 	return f.flush()
 }
 
@@ -47,7 +47,7 @@ func (f *FileStore) Delete(sourceID string) error {
 func (f *FileStore) DeleteRecord(r model.Record) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	delete(f.records, recordKey(r))
+	delete(f.records, model.RecordKey(r))
 	return f.flush()
 }
 
