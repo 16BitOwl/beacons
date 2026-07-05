@@ -29,7 +29,7 @@ func newMockStore() *mockStore {
 }
 
 func storeKey(r model.Record) string {
-	return r.SourceID + "/" + r.ID + "/" + r.Upstream
+	return model.RecordKey(r)
 }
 
 func (m *mockStore) Upsert(r model.Record) error {

@@ -115,13 +115,13 @@ func (s *Syncer) handleSync(ctx context.Context, ev source.Event) {
 	// Build the set of record keys present in the incoming snapshot.
 	activeKeys := make(map[string]struct{}, len(ev.Records))
 	for _, r := range ev.Records {
-		activeKeys[recordKey(r)] = struct{}{}
+		activeKeys[model.RecordKey(r)] = struct{}{}
 	}
 
 	// Find orphaned records: present in the store but absent from the snapshot.
 	var orphaned []model.Record
 	for _, r := range existing {
-		if _, ok := activeKeys[recordKey(r)]; !ok {
+		if _, ok := activeKeys[model.RecordKey(r)]; !ok {
 			orphaned = append(orphaned, r)
 		}
 	}
@@ -355,12 +355,6 @@ func (s *Syncer) retryFailed(ctx context.Context) {
 			s.deleteRecord(ctx, r)
 		}
 	}
-}
-
-// recordKey returns the storage key identifying a record, matching the
-// registry Store's (sourceID, recordID, upstream) key.
-func recordKey(r model.Record) string {
-	return r.SourceID + "/" + r.ID + "/" + r.Upstream
 }
 
 // shortID returns up to 12 characters of an ID for log readability.

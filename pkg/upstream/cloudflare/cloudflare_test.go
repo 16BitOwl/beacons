@@ -231,6 +231,57 @@ func TestUpsert_UpdatesExistingRecord(t *testing.T) {
 	}
 }
 
+func TestUpsert_SkipsUpdateWhenUpToDate(t *testing.T) {
+	putCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			fmt.Fprint(w, cfOK([]dnsRecord{{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4", TTL: 300}}))
+		case http.MethodPut:
+			putCalled = true
+			fmt.Fprint(w, cfOK(dnsRecord{ID: "rec1"}))
+		default:
+			http.Error(w, "unexpected", http.StatusMethodNotAllowed)
+		}
+	}))
+	defer srv.Close()
+
+	u := newTestUpstream(srv.URL, "zone123", "example.com")
+	if err := u.Upsert(context.Background(), rec("A", "web", "1.2.3.4", 300, 0)); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if putCalled {
+		t.Error("expected no PUT when the record is already up to date")
+	}
+}
+
+func TestRecordUpToDate(t *testing.T) {
+	p10, p20 := uint16(10), uint16(20)
+	base := dnsRecordRequest{Type: "A", Name: "web.example.com", Content: "1.2.3.4", TTL: 300}
+	tests := []struct {
+		name     string
+		existing dnsRecord
+		req      dnsRecordRequest
+		want     bool
+	}{
+		{"identical", dnsRecord{Content: "1.2.3.4", TTL: 300}, base, true},
+		{"content differs", dnsRecord{Content: "5.6.7.8", TTL: 300}, base, false},
+		{"ttl differs", dnsRecord{Content: "1.2.3.4", TTL: 60}, base, false},
+		{"comment differs", dnsRecord{Content: "1.2.3.4", TTL: 300, Comment: "old"}, base, false},
+		{"priority equal", dnsRecord{Content: "1.2.3.4", TTL: 300, Priority: &p10}, dnsRecordRequest{Content: "1.2.3.4", TTL: 300, Priority: &p10}, true},
+		{"priority differs", dnsRecord{Content: "1.2.3.4", TTL: 300, Priority: &p10}, dnsRecordRequest{Content: "1.2.3.4", TTL: 300, Priority: &p20}, false},
+		{"priority added", dnsRecord{Content: "1.2.3.4", TTL: 300}, dnsRecordRequest{Content: "1.2.3.4", TTL: 300, Priority: &p10}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := recordUpToDate(tt.existing, tt.req); got != tt.want {
+				t.Errorf("recordUpToDate = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUpsert_AlreadyExistsRace_NotAnError(t *testing.T) {
 	// Simulates the race where list returns empty but create returns 81058.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -63,6 +63,12 @@ type Record struct {
 	Failures int `json:"failures,omitempty"`
 }
 
+// RecordKey returns the stable identity of a record: (sourceID, recordID, upstream).
+// This is the single key shared by the store, syncer, and reconciler.
+func RecordKey(r Record) string {
+	return r.SourceID + "/" + r.ID + "/" + r.Upstream
+}
+
 // UpstreamHTTPConfig holds HTTP client tuning for an upstream adapter.
 // Zero values fall back to the transport defaults
 type UpstreamHTTPConfig struct {
