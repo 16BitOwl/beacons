@@ -28,6 +28,7 @@ http:
   addr: ":9090"       # expose HTTP endpoints; omit or leave empty to disable
   read_timeout: 5     # read timeout in seconds; 0 or omit to disable
   idle_timeout: 30    # idle timeout in seconds; 0 or omit to disable
+  write_timeout: 10   # write timeout in seconds; 0 or omit to disable
   shutdown_timeout: 5 # server shutdown timeout in seconds, must be larger than 0
   auth:
     type: api_key     # "api_key" (default) or "none"; protects secured endpoints

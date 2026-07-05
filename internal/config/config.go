@@ -45,6 +45,10 @@ type HTTPConfig struct {
 	// in seconds (0 = infinite)
 	IdleTimeout int `yaml:"idle_timeout" validate:"min=0"`
 
+	// WriteTimeout configures the HTTP server write timeout
+	// in seconds (0 = infinite)
+	WriteTimeout int `yaml:"write_timeout" validate:"min=0"`
+
 	// ShutdownTimeout configure the HTTP server read timeout
 	// in seconds, must be none zero
 	ShutdownTimeout int `yaml:"shutdown_timeout" validate:"gt=0"`
@@ -119,6 +123,7 @@ func defaults() Config {
 			Addr:            ":9090",
 			ReadTimeout:     5,
 			IdleTimeout:     60,
+			WriteTimeout:    10,
 			ShutdownTimeout: 5,
 			Auth:            AuthConfig{Type: "api_key"},
 		},

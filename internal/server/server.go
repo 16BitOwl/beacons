@@ -60,6 +60,7 @@ func New(opts Options) *Server {
 // Timeouts configures the HTTP server timeout values.
 type Timeouts struct {
 	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
 }
@@ -68,9 +69,10 @@ type Timeouts struct {
 // error occurs.
 func (s *Server) Run(ctx context.Context, t Timeouts) error {
 	srv := &http.Server{
-		Handler:     s.handler,
-		ReadTimeout: t.ReadTimeout,
-		IdleTimeout: t.IdleTimeout,
+		Handler:      s.handler,
+		ReadTimeout:  t.ReadTimeout,
+		WriteTimeout: t.WriteTimeout,
+		IdleTimeout:  t.IdleTimeout,
 	}
 
 	ln, err := net.Listen("tcp", s.addr)
@@ -98,13 +100,23 @@ type healthResponse struct {
 	Records int    `json:"records"`
 }
 
+// errorResponse is the JSON body returned for handler failures. Shared across
+// endpoints so error bodies have one consistent schema.
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(errorResponse{Error: msg})
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	records, err := s.store.List()
 	if err != nil {
 		slog.Warn("healthz: store list failed", "err", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"status":"error"}`))
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to list records")
 		return
 	}
 
@@ -128,9 +140,7 @@ func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 	if err != nil {
 		slog.Warn("state: store list failed",
 			"err", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"status":"error"}`))
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to list records")
 		return
 	}
 

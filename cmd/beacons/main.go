@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -135,7 +136,11 @@ func main() {
 		"http_auth_type", cfg.HTTP.Auth.Type,
 	)
 
-	// Start the HTTP server if configured.
+	// Start the HTTP server if configured. Both it and the syncer are run to
+	// completion before main returns, so shutdown (including the HTTP
+	// server's graceful ShutdownTimeout) is never cut short.
+	var wg sync.WaitGroup
+	var httpErr error
 	if cfg.HTTP.Addr != "" {
 		auth, err := server.NewAuthenticator(server.AuthConfig{
 			Type:   cfg.HTTP.Auth.Type,
@@ -153,21 +158,32 @@ func main() {
 			Gatherer: reg,
 			Auth:     auth,
 		})
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			if err := srv.Run(ctx, server.Timeouts{
 				ReadTimeout:     time.Duration(cfg.HTTP.ReadTimeout) * time.Second,
+				WriteTimeout:    time.Duration(cfg.HTTP.WriteTimeout) * time.Second,
 				IdleTimeout:     time.Duration(cfg.HTTP.IdleTimeout) * time.Second,
 				ShutdownTimeout: time.Duration(cfg.HTTP.ShutdownTimeout) * time.Second,
 			}); err != nil {
-				slog.Error("http server error",
+				httpErr = err
+				slog.Error("http server error, stopping beacons",
 					"err", err)
+				cancel() // treat a listen failure as fatal: stop the syncer too
 			}
 		}()
 	}
 
-	if err := syncer.Run(ctx, sources); err != nil {
+	syncErr := syncer.Run(ctx, sources)
+	cancel() // in case the syncer exited on its own, make sure the server shuts down too
+	wg.Wait()
+
+	if syncErr != nil {
 		slog.Error("syncer exited with error",
-			"err", err)
+			"err", syncErr)
+	}
+	if syncErr != nil || httpErr != nil {
 		os.Exit(1)
 	}
 }
