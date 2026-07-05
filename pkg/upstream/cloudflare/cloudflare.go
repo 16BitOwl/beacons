@@ -72,7 +72,7 @@ func New(ctx context.Context, opts Options) (*Upstream, error) {
 		baseURL: apiBase,
 	}
 
-	slog.Debug("cloudflare upstream initialised",
+	slog.Debug("cloudflare upstream initialized",
 		"upstream", opts.Name,
 		"zone", zone.Name)
 	return &Upstream{name: opts.Name, client: c, zoneName: zone.Name}, nil
@@ -327,7 +327,7 @@ func (c *cfClient) doRaw(ctx context.Context, method, path string, body any) (*a
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var env apiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {

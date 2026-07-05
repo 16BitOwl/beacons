@@ -133,13 +133,13 @@ func TestCNAMEAlias(t *testing.T) {
 
 // authServerHandler is a reusable HTTP handler that:
 //   - POST /api/auth: always returns a valid session
-//   - other paths: behaviour is delegated to the provided handler
+//   - other paths: behavior is delegated to the provided handler
 func newRetryServer(t *testing.T, inner http.Handler) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/auth" {
 			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"session":{"valid":true,"sid":"tok","validity":1800}}`)
+			_, _ = fmt.Fprint(w, `{"session":{"valid":true,"sid":"tok","validity":1800}}`)
 			return
 		}
 		inner.ServeHTTP(w, r)
@@ -155,7 +155,7 @@ func TestGet_RetriesOn401(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"config":{"dns":{"hosts":[]}}}`)
+		_, _ = fmt.Fprint(w, `{"config":{"dns":{"hosts":[]}}}`)
 	}))
 	defer srv.Close()
 
@@ -225,7 +225,7 @@ func TestUpsert_HostsValueChange_PatchDropsStaleEntry(t *testing.T) {
 		case http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			// Existing state still holds the old IP for web.
-			fmt.Fprint(w, `{"config":{"dns":{"hosts":["1.2.3.4 web","9.9.9.9 db"]}}}`)
+			_, _ = fmt.Fprint(w, `{"config":{"dns":{"hosts":["1.2.3.4 web","9.9.9.9 db"]}}}`)
 		case http.MethodPatch:
 			_ = json.NewDecoder(r.Body).Decode(&patched)
 			w.WriteHeader(http.StatusNoContent)
@@ -286,7 +286,7 @@ func TestAuthenticate_RejectedCredentials_WrapsErrAuthFailed(t *testing.T) {
 		authCalls++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"session":{"valid":false,"sid":"","validity":0,"message":"password incorrect"}}`)
+		_, _ = fmt.Fprint(w, `{"session":{"valid":false,"sid":"","validity":0,"message":"password incorrect"}}`)
 	}))
 	defer srv.Close()
 

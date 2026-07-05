@@ -61,7 +61,7 @@ func TestDebugLog_PreservesBodies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if received != reqPayload {
 		t.Errorf("server received body %q, want %q", received, reqPayload)
@@ -99,7 +99,7 @@ func TestDebugLog_RedactsSensitiveHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	out := logs.String()
 	if strings.Contains(out, token) {
@@ -127,7 +127,7 @@ func TestDebugLog_RevealSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if out := logs.String(); !strings.Contains(out, token) {
 		t.Errorf("log output should contain the raw token with RevealSecrets:\n%s", out)
@@ -150,7 +150,7 @@ func TestDebugLog_TruncatesLoggedBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Caller still gets the full body.
 	body, _ := io.ReadAll(resp.Body)

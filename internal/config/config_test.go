@@ -25,7 +25,9 @@ func loadYAML(t *testing.T, yaml string) *Config {
 	if _, err := f.WriteString(yaml); err != nil {
 		t.Fatalf("write temp file: %v", err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatalf("close temp file: %v", err)
+	}
 	cfg, err := Load(f.Name())
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -37,10 +39,10 @@ func loadYAML(t *testing.T, yaml string) *Config {
 // purely from env vars when no config file is provided.
 func TestStaticFieldsSetFromEnv(t *testing.T) {
 	setenv(t, map[string]string{
-		"BEACONS_DEFAULTS_TTL":      "300",
-		"BEACONS_DEFAULTS_COMMENT":  "hello",
+		"BEACONS_DEFAULTS_TTL":       "300",
+		"BEACONS_DEFAULTS_COMMENT":   "hello",
 		"BEACONS_SYNC_POLL_INTERVAL": "60",
-		"BEACONS_SYNC_DRY_RUN":      "true",
+		"BEACONS_SYNC_DRY_RUN":       "true",
 	})
 
 	cfg, err := Load("")
@@ -66,7 +68,7 @@ func TestStaticFieldsSetFromEnv(t *testing.T) {
 // values already loaded from a YAML file.
 func TestStaticFieldsOverriddenByEnv(t *testing.T) {
 	setenv(t, map[string]string{
-		"BEACONS_DEFAULTS_TTL":      "600",
+		"BEACONS_DEFAULTS_TTL":       "600",
 		"BEACONS_SYNC_POLL_INTERVAL": "120",
 	})
 
@@ -207,15 +209,15 @@ func TestMultipleDynamicMapEntries(t *testing.T) {
 // TestEnvOnlyConfig verifies a complete config can be built with no file at all.
 func TestEnvOnlyConfig(t *testing.T) {
 	setenv(t, map[string]string{
-		"BEACONS_DEFAULTS_TTL":                    "120",
-		"BEACONS_SYNC_POLL_INTERVAL":              "30",
-		"BEACONS_SYNC_USE_EVENTS":                 "true",
-		"BEACONS_STORE_TYPE":                      "file",
-		"BEACONS_STORE_PATH":                      "/data/state.json",
-		"BEACONS_UPSTREAMS__CF__TYPE":             "cloudflare",
-		"BEACONS_UPSTREAMS__CF__API_TOKEN":        "tok",
-		"BEACONS_UPSTREAMS__CF__ZONE_ID":          "z1",
-		"BEACONS_SOURCES__DOCKER__TYPE":           "docker",
+		"BEACONS_DEFAULTS_TTL":             "120",
+		"BEACONS_SYNC_POLL_INTERVAL":       "30",
+		"BEACONS_SYNC_USE_EVENTS":          "true",
+		"BEACONS_STORE_TYPE":               "file",
+		"BEACONS_STORE_PATH":               "/data/state.json",
+		"BEACONS_UPSTREAMS__CF__TYPE":      "cloudflare",
+		"BEACONS_UPSTREAMS__CF__API_TOKEN": "tok",
+		"BEACONS_UPSTREAMS__CF__ZONE_ID":   "z1",
+		"BEACONS_SOURCES__DOCKER__TYPE":    "docker",
 	})
 
 	cfg, err := Load("")

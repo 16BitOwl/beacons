@@ -3,7 +3,7 @@ IMAGE      := beacons
 VERSION    ?= dev
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-.PHONY: build docker run fmt vet lint test tidy clean
+.PHONY: build docker run fmt vet lint test vulncheck tidy clean
 
 ## build: compile for Linux (the only supported target)
 build:
@@ -29,9 +29,13 @@ vet:
 lint:
 	golangci-lint run ./...
 
-## test: run all tests
+## test: run all tests with the race detector
 test:
-	go test ./...
+	go test -race ./...
+
+## vulncheck: scan for known vulnerabilities
+vulncheck:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 ## tidy: tidy go.mod and go.sum
 tidy:

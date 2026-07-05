@@ -150,7 +150,7 @@ func TestGetZone_Success(t *testing.T) {
 	const zoneID = "zone123"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, cfOK(map[string]any{"id": zoneID, "name": "example.com"}))
+		_, _ = fmt.Fprint(w, cfOK(map[string]any{"id": zoneID, "name": "example.com"}))
 	}))
 	defer srv.Close()
 
@@ -167,7 +167,7 @@ func TestGetZone_Success(t *testing.T) {
 func TestGetZone_APIError_ReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, cfErr(7003, "could not route to zone"))
+		_, _ = fmt.Fprint(w, cfErr(7003, "could not route to zone"))
 	}))
 	defer srv.Close()
 
@@ -187,10 +187,10 @@ func TestUpsert_CreatesRecordWhenNoneExist(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			fmt.Fprint(w, cfOK([]dnsRecord{}))
+			_, _ = fmt.Fprint(w, cfOK([]dnsRecord{}))
 		case http.MethodPost:
 			created = true
-			fmt.Fprint(w, cfOK(dnsRecord{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4"}))
+			_, _ = fmt.Fprint(w, cfOK(dnsRecord{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4"}))
 		default:
 			http.Error(w, "unexpected", http.StatusMethodNotAllowed)
 		}
@@ -212,10 +212,10 @@ func TestUpsert_UpdatesExistingRecord(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			fmt.Fprint(w, cfOK([]dnsRecord{{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4"}}))
+			_, _ = fmt.Fprint(w, cfOK([]dnsRecord{{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4"}}))
 		case http.MethodPut:
 			updated = true
-			fmt.Fprint(w, cfOK(dnsRecord{ID: "rec1", Type: "A", Name: "web.example.com", Content: "5.6.7.8"}))
+			_, _ = fmt.Fprint(w, cfOK(dnsRecord{ID: "rec1", Type: "A", Name: "web.example.com", Content: "5.6.7.8"}))
 		default:
 			http.Error(w, "unexpected", http.StatusMethodNotAllowed)
 		}
@@ -237,10 +237,10 @@ func TestUpsert_SkipsUpdateWhenUpToDate(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			fmt.Fprint(w, cfOK([]dnsRecord{{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4", TTL: 300}}))
+			_, _ = fmt.Fprint(w, cfOK([]dnsRecord{{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4", TTL: 300}}))
 		case http.MethodPut:
 			putCalled = true
-			fmt.Fprint(w, cfOK(dnsRecord{ID: "rec1"}))
+			_, _ = fmt.Fprint(w, cfOK(dnsRecord{ID: "rec1"}))
 		default:
 			http.Error(w, "unexpected", http.StatusMethodNotAllowed)
 		}
@@ -288,9 +288,9 @@ func TestUpsert_AlreadyExistsRace_NotAnError(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			fmt.Fprint(w, cfOK([]dnsRecord{}))
+			_, _ = fmt.Fprint(w, cfOK([]dnsRecord{}))
 		case http.MethodPost:
-			fmt.Fprint(w, cfErr(81058, "An identical record already exists."))
+			_, _ = fmt.Fprint(w, cfErr(81058, "An identical record already exists."))
 		default:
 			http.Error(w, "unexpected", http.StatusMethodNotAllowed)
 		}
@@ -318,10 +318,10 @@ func TestUpsert_SetsPriorityOnCreate(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			fmt.Fprint(w, cfOK([]dnsRecord{}))
+			_, _ = fmt.Fprint(w, cfOK([]dnsRecord{}))
 		case http.MethodPost:
 			json.NewDecoder(r.Body).Decode(&gotBody) //nolint:errcheck
-			fmt.Fprint(w, cfOK(dnsRecord{ID: "mx1"}))
+			_, _ = fmt.Fprint(w, cfOK(dnsRecord{ID: "mx1"}))
 		default:
 			http.Error(w, "unexpected", http.StatusMethodNotAllowed)
 		}
@@ -347,10 +347,10 @@ func TestDelete_DeletesMatchingRecord(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			fmt.Fprint(w, cfOK([]dnsRecord{{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4"}}))
+			_, _ = fmt.Fprint(w, cfOK([]dnsRecord{{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4"}}))
 		case http.MethodDelete:
 			deleted = true
-			fmt.Fprint(w, cfOK(map[string]string{"id": "rec1"}))
+			_, _ = fmt.Fprint(w, cfOK(map[string]string{"id": "rec1"}))
 		default:
 			http.Error(w, "unexpected", http.StatusMethodNotAllowed)
 		}
@@ -369,7 +369,7 @@ func TestDelete_DeletesMatchingRecord(t *testing.T) {
 func TestDelete_RecordNotFound_NoError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, cfOK([]dnsRecord{}))
+		_, _ = fmt.Fprint(w, cfOK([]dnsRecord{}))
 	}))
 	defer srv.Close()
 
@@ -385,13 +385,13 @@ func TestDelete_DeletesAllMatchingRecords(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.Method {
 		case http.MethodGet:
-			fmt.Fprint(w, cfOK([]dnsRecord{
+			_, _ = fmt.Fprint(w, cfOK([]dnsRecord{
 				{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4"},
 				{ID: "rec2", Type: "A", Name: "web.example.com", Content: "1.2.3.4"},
 			}))
 		case http.MethodDelete:
 			deleteCount++
-			fmt.Fprint(w, cfOK(map[string]string{"id": "rec1"}))
+			_, _ = fmt.Fprint(w, cfOK(map[string]string{"id": "rec1"}))
 		default:
 			http.Error(w, "unexpected", http.StatusMethodNotAllowed)
 		}
@@ -423,9 +423,9 @@ func TestListDNSRecords_Pagination_FetchesAllPages(t *testing.T) {
 		getCount++
 		switch r.URL.Query().Get("page") {
 		case "1":
-			fmt.Fprint(w, cfOKPaged([]dnsRecord{{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4"}}, 1, 2))
+			_, _ = fmt.Fprint(w, cfOKPaged([]dnsRecord{{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4"}}, 1, 2))
 		default:
-			fmt.Fprint(w, cfOKPaged([]dnsRecord{{ID: "rec2", Type: "A", Name: "web.example.com", Content: "5.6.7.8"}}, 2, 2))
+			_, _ = fmt.Fprint(w, cfOKPaged([]dnsRecord{{ID: "rec2", Type: "A", Name: "web.example.com", Content: "5.6.7.8"}}, 2, 2))
 		}
 	}))
 	defer srv.Close()

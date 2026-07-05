@@ -132,7 +132,11 @@ func (t *debugTransport) captureRequestBody(req *http.Request) (*http.Request, s
 	}
 
 	data, err := io.ReadAll(src)
-	src.Close()
+	if closeErr := src.Close(); closeErr != nil {
+		slog.Debug("debug transport: failed to close request body",
+			"upstream", t.opts.Name,
+			"err", closeErr)
+	}
 	if err != nil {
 		return nil, "", err
 	}
@@ -153,7 +157,11 @@ func (t *debugTransport) captureResponseBody(resp *http.Response) string {
 		return ""
 	}
 	data, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	if closeErr := resp.Body.Close(); closeErr != nil {
+		slog.Debug("debug transport: failed to close response body",
+			"upstream", t.opts.Name,
+			"err", closeErr)
+	}
 	resp.Body = &replayBody{r: bytes.NewReader(data), err: err}
 
 	body := t.bodyForLog(data)

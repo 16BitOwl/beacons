@@ -217,7 +217,7 @@ func TestRetry_NonReplayableBody_ReturnsLastResponse(t *testing.T) {
 // Retry — context cancellation
 // ---------------------------------------------------------------------------
 
-func TestRetry_ContextCancelled_StopsRetrying(t *testing.T) {
+func TestRetry_ContextCanceled_StopsRetrying(t *testing.T) {
 	calls := 0
 	base := roundTripFunc(func(*http.Request) (*http.Response, error) {
 		calls++
@@ -240,7 +240,7 @@ func TestRetry_ContextCancelled_StopsRetrying(t *testing.T) {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
 	if calls != 1 {
-		t.Errorf("calls = %d, want 1 (context cancelled before first retry)", calls)
+		t.Errorf("calls = %d, want 1 (context canceled before first retry)", calls)
 	}
 }
 
@@ -289,7 +289,7 @@ func TestIsRetryable(t *testing.T) {
 // calcDelay
 // ---------------------------------------------------------------------------
 
-func TestCalcDelay_RetryAfterHeader_HonouredOn429(t *testing.T) {
+func TestCalcDelay_RetryAfterHeader_HonoredOn429(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: http.StatusTooManyRequests,
 		Header:     http.Header{"Retry-After": []string{"42"}},

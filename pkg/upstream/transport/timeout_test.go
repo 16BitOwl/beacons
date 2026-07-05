@@ -55,10 +55,10 @@ func TestAttemptTimeout_BodyCloseReleasesContext(t *testing.T) {
 
 	select {
 	case <-attemptCtx.Done():
-		t.Fatal("context cancelled before the body was closed")
+		t.Fatal("context canceled before the body was closed")
 	default:
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	select {
 	case <-attemptCtx.Done():
 	default:

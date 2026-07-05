@@ -13,17 +13,17 @@ const envPrefix = "BEACONS"
 // overlayEnv walks v (must be a pointer to a struct) and overlays matching
 // BEACONS_* environment variables onto it.
 //
-// Naming convention:
-//   - Static struct fields use single underscores as separators, matching the yaml tag path:
-//     BEACONS_DEFAULTS_TTL, BEACONS_SYNC_POLL_INTERVAL
-//   - Dynamic map keys are wrapped in double underscores:
-//     BEACONS_UPSTREAMS__CF_ZONE_A__TYPE
-//     where CF_ZONE_A is the map key (hyphens represented as single underscores)
-// revealValues controls whether overridden values (which might be secrets) are
-// included in the debug logs; when false only the key is logged.
+// Static struct fields use single underscores as separators, matching the
+// yaml tag path, e.g. BEACONS_DEFAULTS_TTL or BEACONS_SYNC_POLL_INTERVAL.
+// Dynamic map keys are wrapped in double underscores, e.g.
+// BEACONS_UPSTREAMS__CF_ZONE_A__TYPE, where CF_ZONE_A is the map key
+// (hyphens represented as single underscores).
+//
+// revealValues controls whether overridden values (which might be secrets)
+// are included in the debug logs; when false only the key is logged.
 func overlayEnv(v any, revealValues bool) {
 	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Ptr || rv.Elem().Kind() != reflect.Struct {
+	if rv.Kind() != reflect.Pointer || rv.Elem().Kind() != reflect.Struct {
 		return
 	}
 	// Build an index of all BEACONS_ env vars once for the whole walk.

@@ -43,7 +43,7 @@ type Source interface {
 	Name() string
 
 	// Run starts the source adapter. It emits events on ch and blocks until ctx
-	// is cancelled. Implementations should handle both polling and event-driven
+	// is canceled. Implementations should handle both polling and event-driven
 	// modes as configured.
 	Run(ctx context.Context, ch chan<- Event) error
 }

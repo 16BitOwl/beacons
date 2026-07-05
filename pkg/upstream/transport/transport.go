@@ -50,7 +50,7 @@ type ClientOptions struct {
 // AttemptTimeout → Auth → DebugLog (when enabled).
 //
 // This is the single construction path every upstream adapter should use so
-// that retry, backoff, and circuit-breaking behaviour is identical across
+// that retry, backoff, and circuit-breaking behavior is identical across
 // providers. Adapters only supply their authentication middleware.
 //
 // The timeout sits inside Retry so each attempt gets a fresh deadline; the
@@ -87,7 +87,7 @@ func NewClient(opts ClientOptions) *http.Client {
 	}
 }
 
-// Middleware wraps an http.RoundTripper with additional behaviour.
+// Middleware wraps an http.RoundTripper with additional behavior.
 type Middleware func(http.RoundTripper) http.RoundTripper
 
 // Chain builds an http.RoundTripper by applying middlewares to base in order.
@@ -110,5 +110,5 @@ func drainAndClose(resp *http.Response) {
 		return
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }

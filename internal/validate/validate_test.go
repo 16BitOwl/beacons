@@ -72,7 +72,7 @@ func TestRequired_String(t *testing.T) {
 	type S struct {
 		V string `validate:"required"`
 	}
-	mustErrors(t, validate.Struct(&S{V: ""}))
+	_ = mustErrors(t, validate.Struct(&S{V: ""}))
 	mustPass(t, validate.Struct(&S{V: "hello"}))
 }
 
@@ -80,7 +80,7 @@ func TestRequired_Int(t *testing.T) {
 	type S struct {
 		V int `validate:"required"`
 	}
-	mustErrors(t, validate.Struct(&S{V: 0}))
+	_ = mustErrors(t, validate.Struct(&S{V: 0}))
 	mustPass(t, validate.Struct(&S{V: 1}))
 	mustPass(t, validate.Struct(&S{V: -1}))
 }
@@ -89,7 +89,7 @@ func TestRequired_Bool(t *testing.T) {
 	type S struct {
 		V bool `validate:"required"`
 	}
-	mustErrors(t, validate.Struct(&S{V: false}))
+	_ = mustErrors(t, validate.Struct(&S{V: false}))
 	mustPass(t, validate.Struct(&S{V: true}))
 }
 
@@ -97,8 +97,8 @@ func TestRequired_Slice(t *testing.T) {
 	type S struct {
 		V []string `validate:"required"`
 	}
-	mustErrors(t, validate.Struct(&S{V: nil}))
-	mustErrors(t, validate.Struct(&S{V: []string{}}))
+	_ = mustErrors(t, validate.Struct(&S{V: nil}))
+	_ = mustErrors(t, validate.Struct(&S{V: []string{}}))
 	mustPass(t, validate.Struct(&S{V: []string{"x"}}))
 }
 
@@ -106,8 +106,8 @@ func TestRequired_Map(t *testing.T) {
 	type S struct {
 		V map[string]string `validate:"required"`
 	}
-	mustErrors(t, validate.Struct(&S{V: nil}))
-	mustErrors(t, validate.Struct(&S{V: map[string]string{}}))
+	_ = mustErrors(t, validate.Struct(&S{V: nil}))
+	_ = mustErrors(t, validate.Struct(&S{V: map[string]string{}}))
 	mustPass(t, validate.Struct(&S{V: map[string]string{"k": "v"}}))
 }
 
@@ -115,7 +115,7 @@ func TestRequired_Pointer(t *testing.T) {
 	type S struct {
 		V *string `validate:"required"`
 	}
-	mustErrors(t, validate.Struct(&S{V: nil}))
+	_ = mustErrors(t, validate.Struct(&S{V: nil}))
 	s := "hello"
 	mustPass(t, validate.Struct(&S{V: &s}))
 }
@@ -137,7 +137,7 @@ func TestOmitempty_ContinuesOnNonZero(t *testing.T) {
 		V string `validate:"omitempty,url"`
 	}
 	// Non-empty but invalid URL: omitempty passes, url fires.
-	mustErrors(t, validate.Struct(&S{V: "not-a-url"}))
+	_ = mustErrors(t, validate.Struct(&S{V: "not-a-url"}))
 }
 
 func TestOmitempty_PassesWithValidValue(t *testing.T) {
@@ -181,7 +181,7 @@ func TestOneof_InvalidValues(t *testing.T) {
 		V string `validate:"oneof=foo bar baz"`
 	}
 	for _, v := range []string{"qux", "", "Foo", "FOO", "foo "} {
-		mustErrors(t, validate.Struct(&S{V: v}))
+		_ = mustErrors(t, validate.Struct(&S{V: v}))
 	}
 }
 
@@ -201,8 +201,8 @@ func TestGt_Int(t *testing.T) {
 	type S struct {
 		V int `validate:"gt=0"`
 	}
-	mustErrors(t, validate.Struct(&S{V: 0}))
-	mustErrors(t, validate.Struct(&S{V: -1}))
+	_ = mustErrors(t, validate.Struct(&S{V: 0}))
+	_ = mustErrors(t, validate.Struct(&S{V: -1}))
 	mustPass(t, validate.Struct(&S{V: 1}))
 	mustPass(t, validate.Struct(&S{V: 100}))
 }
@@ -223,8 +223,8 @@ func TestMin_String(t *testing.T) {
 	type S struct {
 		V string `validate:"min=3"`
 	}
-	mustErrors(t, validate.Struct(&S{V: ""}))
-	mustErrors(t, validate.Struct(&S{V: "ab"}))
+	_ = mustErrors(t, validate.Struct(&S{V: ""}))
+	_ = mustErrors(t, validate.Struct(&S{V: "ab"}))
 	mustPass(t, validate.Struct(&S{V: "abc"}))
 	mustPass(t, validate.Struct(&S{V: "abcd"}))
 }
@@ -233,7 +233,7 @@ func TestMin_Int(t *testing.T) {
 	type S struct {
 		V int `validate:"min=0"`
 	}
-	mustErrors(t, validate.Struct(&S{V: -1}))
+	_ = mustErrors(t, validate.Struct(&S{V: -1}))
 	mustPass(t, validate.Struct(&S{V: 0}))
 	mustPass(t, validate.Struct(&S{V: 100}))
 }
@@ -256,7 +256,7 @@ func TestMax_String(t *testing.T) {
 	}
 	mustPass(t, validate.Struct(&S{V: ""}))
 	mustPass(t, validate.Struct(&S{V: "hello"}))
-	mustErrors(t, validate.Struct(&S{V: "toolong"}))
+	_ = mustErrors(t, validate.Struct(&S{V: "toolong"}))
 }
 
 func TestMax_Int(t *testing.T) {
@@ -265,7 +265,7 @@ func TestMax_Int(t *testing.T) {
 	}
 	mustPass(t, validate.Struct(&S{V: 0}))
 	mustPass(t, validate.Struct(&S{V: 100}))
-	mustErrors(t, validate.Struct(&S{V: 101}))
+	_ = mustErrors(t, validate.Struct(&S{V: 101}))
 }
 
 func TestMax_ErrorTag(t *testing.T) {
@@ -307,7 +307,7 @@ func TestURL_Invalid(t *testing.T) {
 		"ftp://",
 		"just-a-hostname",
 	} {
-		mustErrors(t, validate.Struct(&S{V: v}))
+		_ = mustErrors(t, validate.Struct(&S{V: v}))
 	}
 }
 
@@ -347,7 +347,7 @@ func TestHostnamePort_Invalid(t *testing.T) {
 		"",
 		"http://localhost:8080",
 	} {
-		mustErrors(t, validate.Struct(&S{V: v}))
+		_ = mustErrors(t, validate.Struct(&S{V: v}))
 	}
 }
 
@@ -695,21 +695,7 @@ func TestValidatable_CustomRuleWithPrefix(t *testing.T) {
 }
 
 func TestValidatable_CustomAndTagErrorsCombined(t *testing.T) {
-	type S struct {
-		Type  string `yaml:"type"  validate:"required"`
-		Value string `yaml:"value"`
-	}
-	// Embed customValidated to get both tag errors and Validatable errors in one struct.
-	// Instead, use a struct that has both tag rules and implements Validatable.
-	// We verify this via customValidated with a required tag on Type.
-	type WithRequired struct {
-		Type  string `yaml:"type"  validate:"required"`
-		Value string `yaml:"value"`
-	}
-	// This struct doesn't implement Validatable, so no custom errors — just verify
-	// tag errors work alongside the interface by using the customValidated type with a tag.
-	_ = S{}
-	// Direct test: customValidated has no validate tags but does implement Validatable.
+	// customValidated has no validate tags but does implement Validatable.
 	// Errors from Validatable are included alongside any tag errors.
 	err := validate.Struct(&customValidated{Type: "special", Value: ""})
 	ve := mustErrors(t, err)

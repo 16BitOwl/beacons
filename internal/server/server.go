@@ -65,7 +65,7 @@ type Timeouts struct {
 	ShutdownTimeout time.Duration
 }
 
-// Run starts the HTTP server and blocks until ctx is cancelled or a listen
+// Run starts the HTTP server and blocks until ctx is canceled or a listen
 // error occurs.
 func (s *Server) Run(ctx context.Context, t Timeouts) error {
 	srv := &http.Server{

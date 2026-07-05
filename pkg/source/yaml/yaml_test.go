@@ -21,7 +21,7 @@ func writeYAML(t *testing.T, content string) string {
 	if _, err := f.WriteString(content); err != nil {
 		t.Fatalf("WriteString: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 	return f.Name()
 }
 
@@ -151,7 +151,6 @@ records:
 		t.Errorf("TTL = %d, want 600 (file defaults should override global)", records[0].TTL)
 	}
 }
-
 
 func TestParseFile_PerFieldTTLOverride(t *testing.T) {
 	path := writeYAML(t, `
@@ -403,7 +402,7 @@ func TestGlobDirs_SingleDir(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"a.yaml", "b.yaml"} {
 		f, _ := os.Create(filepath.Join(dir, name))
-		f.Close()
+		_ = f.Close()
 	}
 	glob := filepath.Join(dir, "*.yaml")
 	dirs, err := globDirs(glob)
@@ -426,9 +425,9 @@ func TestGlobDirs_MultipleDirs(t *testing.T) {
 	_ = os.MkdirAll(dir2, 0o750)
 
 	f1, _ := os.Create(filepath.Join(dir1, "x.yaml"))
-	f1.Close()
+	_ = f1.Close()
 	f2, _ := os.Create(filepath.Join(dir2, "y.yaml"))
-	f2.Close()
+	_ = f2.Close()
 
 	dirs, err := globDirs(filepath.Join(root, "*", "*.yaml"))
 	if err != nil {

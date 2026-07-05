@@ -44,7 +44,7 @@ type Source struct {
 
 // New creates a new Docker source adapter.
 func New(opts Options) (*Source, error) {
-	// FromEnv honours DOCKER_HOST et al; an explicit host in config wins.
+	// FromEnv honors DOCKER_HOST et al; an explicit host in config wins.
 	clientOpts := []dockerclient.Opt{dockerclient.FromEnv}
 	if opts.Host != "" {
 		clientOpts = append(clientOpts, dockerclient.WithHost(opts.Host))
