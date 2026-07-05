@@ -142,8 +142,9 @@ func (u *Upstream) patchHosts(ctx context.Context, r model.Record, remove bool) 
 	}
 
 	entry := r.Value + " " + r.Name
-	if !remove && containsEntry(current, entry) {
-		slog.Debug("pihole host entry already present, skipping",
+	desired, changed := applyByName(current, r.Name, entry, remove, hostName)
+	if !changed {
+		slog.Debug("pihole host entry already up to date, skipping",
 			"upstream", u.name,
 			"entry", entry)
 		return nil
@@ -158,7 +159,7 @@ func (u *Upstream) patchHosts(ctx context.Context, r model.Record, remove bool) 
 		"entry", entry)
 	return u.patch(ctx, map[string]any{
 		"config": map[string]any{
-			"dns": map[string]any{"hosts": toggleEntry(current, entry, remove)},
+			"dns": map[string]any{"hosts": desired},
 		},
 	})
 }
@@ -182,8 +183,9 @@ func (u *Upstream) patchCNAME(ctx context.Context, r model.Record, remove bool) 
 	if r.TTL > 0 {
 		entry = fmt.Sprintf("%s,%d", entry, r.TTL)
 	}
-	if !remove && containsEntry(current, entry) {
-		slog.Debug("pihole cname entry already present, skipping",
+	desired, changed := applyByName(current, r.Name, entry, remove, cnameAlias)
+	if !changed {
+		slog.Debug("pihole cname entry already up to date, skipping",
 			"upstream", u.name,
 			"entry", entry)
 		return nil
@@ -198,7 +200,7 @@ func (u *Upstream) patchCNAME(ctx context.Context, r model.Record, remove bool) 
 		"entry", entry)
 	return u.patch(ctx, map[string]any{
 		"config": map[string]any{
-			"dns": map[string]any{"cnameRecords": toggleEntry(current, entry, remove)},
+			"dns": map[string]any{"cnameRecords": desired},
 		},
 	})
 }
@@ -233,28 +235,52 @@ func (u *Upstream) getCNAMERecords(ctx context.Context) ([]string, error) {
 	return result.Config.DNS.CNAMERecords, nil
 }
 
-// toggleEntry adds or removes an entry from a slice.
-func toggleEntry(entries []string, entry string, remove bool) []string {
-	out := make([]string, 0, len(entries))
+// applyByName upserts or removes entry, keyed by DNS name rather than exact
+// string. nameOf extracts the owning name from an entry. Removing every entry
+// that shares the record's name is what stops a value/TTL change leaving a
+// stale duplicate behind. This assumes one entry per name (PiHole is not used
+// for multi-value round-robin); the reconciler will key on the full record
+// instead once it lands.
+//
+// changed reports whether the result differs from entries, so a no-op can skip
+// the PATCH.
+func applyByName(entries []string, name, entry string, remove bool, nameOf func(string) string) (out []string, changed bool) {
+	out = make([]string, 0, len(entries)+1)
+	owned, exact := 0, false
 	for _, e := range entries {
-		if e != entry {
-			out = append(out, e)
+		if nameOf(e) == name {
+			owned++
+			if e == entry {
+				exact = true
+			}
+			continue
 		}
+		out = append(out, e)
 	}
-	if !remove {
-		out = append(out, entry)
+	if remove {
+		return out, owned > 0
 	}
-	return out
+	out = append(out, entry)
+	// Unchanged only when the sole existing entry for the name already matches.
+	return out, !(exact && owned == 1)
 }
 
-// containsEntry reports whether entry is present in entries (exact match).
-func containsEntry(entries []string, entry string) bool {
-	for _, e := range entries {
-		if e == entry {
-			return true
-		}
+// hostName returns the hostname from a "IP hostname" hosts entry. Beacons writes
+// single-host entries; a multi-host line returns the whole trailing segment and
+// so won't match a single record name (leaving hand-managed lines untouched).
+func hostName(entry string) string {
+	if i := strings.IndexByte(entry, ' '); i >= 0 {
+		return strings.TrimSpace(entry[i+1:])
 	}
-	return false
+	return ""
+}
+
+// cnameAlias returns the alias from an "alias,target[,ttl]" cname entry.
+func cnameAlias(entry string) string {
+	if i := strings.IndexByte(entry, ','); i >= 0 {
+		return entry[:i]
+	}
+	return entry
 }
 
 // authenticate acquires a PiHole session token. It is supplied to the

@@ -2,139 +2,128 @@ package pihole
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/16bitowl/beacons/internal/model"
 	"github.com/16bitowl/beacons/pkg/upstream/transport"
 )
 
 // ---------------------------------------------------------------------------
-// toggleEntry
+// applyByName — hosts ("IP hostname")
 // ---------------------------------------------------------------------------
 
-func TestToggleEntry_Add_AppendsMissingEntry(t *testing.T) {
-	entries := []string{"a", "b"}
-	got := toggleEntry(entries, "c", false)
-	if len(got) != 3 {
-		t.Fatalf("len = %d, want 3", len(got))
+func TestApplyByName_Hosts_AddAppends(t *testing.T) {
+	got, changed := applyByName([]string{"1.2.3.4 web"}, "api", "5.6.7.8 api", false, hostName)
+	if !changed {
+		t.Fatal("changed = false, want true")
 	}
-	if got[2] != "c" {
-		t.Errorf("last entry = %q, want c", got[2])
-	}
-}
-
-func TestToggleEntry_Add_DoesNotDuplicateExistingEntry(t *testing.T) {
-	// toggleEntry always appends even if the entry already exists;
-	// the caller's idempotency check prevents redundant PATCH calls.
-	// Here we verify the returned slice length is correct.
-	entries := []string{"a", "b", "c"}
-	got := toggleEntry(entries, "b", false)
-	// existing entries minus "b" → ["a", "c"], then append "b" → ["a", "c", "b"]
-	if len(got) != 3 {
-		t.Fatalf("len = %d, want 3", len(got))
+	if len(got) != 2 || got[1] != "5.6.7.8 api" {
+		t.Errorf("got %v, want [1.2.3.4 web 5.6.7.8 api]", got)
 	}
 }
 
-func TestToggleEntry_Remove_DeletesMatchingEntry(t *testing.T) {
-	entries := []string{"1.2.3.4 web", "5.6.7.8 api", "9.0.1.2 db"}
-	got := toggleEntry(entries, "5.6.7.8 api", true)
-	if len(got) != 2 {
-		t.Fatalf("len = %d, want 2", len(got))
+func TestApplyByName_Hosts_ValueChangeReplacesStale(t *testing.T) {
+	// The #4 bug: changing an IP must not leave the old entry behind.
+	got, changed := applyByName([]string{"1.2.3.4 web", "9.9.9.9 db"}, "web", "5.6.7.8 web", false, hostName)
+	if !changed {
+		t.Fatal("changed = false, want true")
 	}
 	for _, e := range got {
-		if e == "5.6.7.8 api" {
-			t.Errorf("removed entry should not be present")
+		if e == "1.2.3.4 web" {
+			t.Errorf("stale entry %q not removed: %v", e, got)
 		}
 	}
-}
-
-func TestToggleEntry_Remove_NonExistentEntry_NoChange(t *testing.T) {
-	entries := []string{"a", "b"}
-	got := toggleEntry(entries, "c", true)
 	if len(got) != 2 {
-		t.Fatalf("len = %d, want 2", len(got))
+		t.Fatalf("len = %d, want 2 (db preserved, web replaced): %v", len(got), got)
 	}
 }
 
-func TestToggleEntry_Remove_AllMatchingRemoved(t *testing.T) {
-	// Only exact matches are removed — verify no over-removal.
-	entries := []string{"web,target", "web,target,300", "api,target"}
-	got := toggleEntry(entries, "web,target", true)
-	// "web,target,300" is not an exact match — should remain.
-	if len(got) != 2 {
-		t.Fatalf("len = %d, want 2; entries: %v", len(got), got)
+func TestApplyByName_Hosts_UnchangedWhenIdentical(t *testing.T) {
+	_, changed := applyByName([]string{"1.2.3.4 web"}, "web", "1.2.3.4 web", false, hostName)
+	if changed {
+		t.Error("changed = true, want false for identical entry")
 	}
 }
 
-func TestToggleEntry_EmptyList_Add(t *testing.T) {
-	got := toggleEntry(nil, "new", false)
-	if len(got) != 1 {
-		t.Fatalf("len = %d, want 1", len(got))
+func TestApplyByName_Hosts_RemoveByName(t *testing.T) {
+	got, changed := applyByName([]string{"1.2.3.4 web", "5.6.7.8 api"}, "web", "1.2.3.4 web", true, hostName)
+	if !changed {
+		t.Fatal("changed = false, want true")
 	}
-	if got[0] != "new" {
-		t.Errorf("got[0] = %q, want new", got[0])
-	}
-}
-
-func TestToggleEntry_EmptyList_Remove(t *testing.T) {
-	got := toggleEntry(nil, "new", true)
-	if len(got) != 0 {
-		t.Errorf("len = %d, want 0", len(got))
+	if len(got) != 1 || got[0] != "5.6.7.8 api" {
+		t.Errorf("got %v, want [5.6.7.8 api]", got)
 	}
 }
 
-func TestToggleEntry_PreservesOrder(t *testing.T) {
-	entries := []string{"first", "second", "third"}
-	got := toggleEntry(entries, "fourth", false)
-	// first, second, third are preserved in order, fourth appended
-	if got[0] != "first" || got[1] != "second" || got[2] != "third" || got[3] != "fourth" {
+func TestApplyByName_Hosts_RemoveAbsent_NoChange(t *testing.T) {
+	_, changed := applyByName([]string{"5.6.7.8 api"}, "web", "1.2.3.4 web", true, hostName)
+	if changed {
+		t.Error("changed = true, want false when name absent")
+	}
+}
+
+func TestApplyByName_Hosts_PreservesUnrelatedOrder(t *testing.T) {
+	got, _ := applyByName([]string{"1.1.1.1 a", "2.2.2.2 b"}, "c", "3.3.3.3 c", false, hostName)
+	if got[0] != "1.1.1.1 a" || got[1] != "2.2.2.2 b" || got[2] != "3.3.3.3 c" {
 		t.Errorf("order not preserved: %v", got)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// containsEntry
+// applyByName — cname ("alias,target[,ttl]")
 // ---------------------------------------------------------------------------
 
-func TestContainsEntry_Present_ReturnsTrue(t *testing.T) {
-	entries := []string{"a", "b", "c"}
-	if !containsEntry(entries, "b") {
-		t.Error("expected true for present entry")
+func TestApplyByName_CNAME_TTLChangeReplacesStale(t *testing.T) {
+	got, changed := applyByName([]string{"web,target,300"}, "web", "web,target,600", false, cnameAlias)
+	if !changed {
+		t.Fatal("changed = false, want true")
+	}
+	if len(got) != 1 || got[0] != "web,target,600" {
+		t.Errorf("got %v, want [web,target,600]", got)
 	}
 }
 
-func TestContainsEntry_Absent_ReturnsFalse(t *testing.T) {
-	entries := []string{"a", "b", "c"}
-	if containsEntry(entries, "d") {
-		t.Error("expected false for absent entry")
+func TestApplyByName_CNAME_UnchangedWhenIdentical(t *testing.T) {
+	_, changed := applyByName([]string{"web,target,300"}, "web", "web,target,300", false, cnameAlias)
+	if changed {
+		t.Error("changed = true, want false for identical entry")
 	}
 }
 
-func TestContainsEntry_EmptySlice_ReturnsFalse(t *testing.T) {
-	if containsEntry(nil, "x") {
-		t.Error("expected false for nil slice")
+// ---------------------------------------------------------------------------
+// hostName / cnameAlias
+// ---------------------------------------------------------------------------
+
+func TestHostName(t *testing.T) {
+	if got := hostName("1.2.3.4 web"); got != "web" {
+		t.Errorf("single-host = %q, want web", got)
+	}
+	if got := hostName("::1 ipv6.host"); got != "ipv6.host" {
+		t.Errorf("ipv6 = %q, want ipv6.host", got)
+	}
+	// Multi-host line returns the whole segment, so it won't match a single name.
+	if got := hostName("1.2.3.4 a b"); got != "a b" {
+		t.Errorf("multi-host = %q, want 'a b'", got)
+	}
+	if got := hostName("malformed"); got != "" {
+		t.Errorf("malformed = %q, want empty", got)
 	}
 }
 
-func TestContainsEntry_PartialMatch_ReturnsFalse(t *testing.T) {
-	// "web,target" must not match "web,target,300" — exact match only.
-	if containsEntry([]string{"web,target,300"}, "web,target") {
-		t.Error("expected false: partial prefix should not match")
+func TestCNAMEAlias(t *testing.T) {
+	if got := cnameAlias("web,target"); got != "web" {
+		t.Errorf("no-ttl = %q, want web", got)
 	}
-}
-
-func TestContainsEntry_FirstEntry_ReturnsTrue(t *testing.T) {
-	if !containsEntry([]string{"first", "second"}, "first") {
-		t.Error("expected true for first entry")
+	if got := cnameAlias("web,target,300"); got != "web" {
+		t.Errorf("with-ttl = %q, want web", got)
 	}
-}
-
-func TestContainsEntry_LastEntry_ReturnsTrue(t *testing.T) {
-	if !containsEntry([]string{"first", "second", "last"}, "last") {
-		t.Error("expected true for last entry")
+	if got := cnameAlias("noComma"); got != "noComma" {
+		t.Errorf("no-comma = %q, want noComma", got)
 	}
 }
 
@@ -223,6 +212,68 @@ func TestPatch_PersistentUnauthorized_ReturnsError(t *testing.T) {
 	if err := u.patch(context.Background(), map[string]any{"key": "val"}); err == nil {
 		t.Fatal("expected error after persistent 401, got nil")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Upsert flow — value change drops the stale hosts entry (#4)
+// ---------------------------------------------------------------------------
+
+func TestUpsert_HostsValueChange_PatchDropsStaleEntry(t *testing.T) {
+	var patched map[string]any
+	srv := newRetryServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			// Existing state still holds the old IP for web.
+			fmt.Fprint(w, `{"config":{"dns":{"hosts":["1.2.3.4 web","9.9.9.9 db"]}}}`)
+		case http.MethodPatch:
+			_ = json.NewDecoder(r.Body).Decode(&patched)
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer srv.Close()
+
+	u := New(Options{Name: "test", BaseURL: srv.URL, Password: "pw"})
+	rec := model.Record{Type: model.RecordTypeA, Name: "web", Value: "5.6.7.8"}
+	if err := u.Upsert(context.Background(), rec); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	hosts := patchedHosts(t, patched)
+	for _, h := range hosts {
+		if h == "1.2.3.4 web" {
+			t.Errorf("stale entry still present in PATCH: %v", hosts)
+		}
+	}
+	if !contains(hosts, "5.6.7.8 web") {
+		t.Errorf("new entry missing from PATCH: %v", hosts)
+	}
+	if !contains(hosts, "9.9.9.9 db") {
+		t.Errorf("unrelated entry dropped from PATCH: %v", hosts)
+	}
+}
+
+// patchedHosts extracts config.dns.hosts from a decoded PATCH body.
+func patchedHosts(t *testing.T, body map[string]any) []string {
+	t.Helper()
+	cfg, _ := body["config"].(map[string]any)
+	dns, _ := cfg["dns"].(map[string]any)
+	raw, _ := dns["hosts"].([]any)
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		s, _ := v.(string)
+		out = append(out, s)
+	}
+	return out
+}
+
+func contains(s []string, want string) bool {
+	for _, v := range s {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
