@@ -1,0 +1,58 @@
+name: New upstream request
+description: Propose support for a new DNS upstream provider
+labels: ["upstream", "enhancement"]
+body:
+  - type: input
+    id: provider
+    attributes:
+      label: Provider name
+      placeholder: e.g. Technitium
+    validations:
+      required: true
+
+  - type: input
+    id: api-docs
+    attributes:
+      label: API documentation link
+    validations:
+      required: true
+
+  - type: textarea
+    id: auth
+    attributes:
+      label: Authentication method
+      description: API token, basic auth, OAuth, etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: record-types
+    attributes:
+      label: Supported record types
+      description: Which record types (A, AAAA, CNAME, TXT, ...) does this provider's API support for create/update/delete?
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why is this upstream needed?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Are you willing to implement this?
+      options:
+        - "Yes"
+        - "No"
+        - "Maybe, with guidance"
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context

@@ -30,7 +30,7 @@ By default in the example Docker compose the `beacons` service mounts the Docker
 ## Supported upstreams
 
 - **Cloudflare**
-- **Pi-hole**
+- **Pi-hole** (v6+)
 
 ## Configuration
 
