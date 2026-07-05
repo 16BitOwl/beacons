@@ -1,5 +1,5 @@
 // Package server provides the HTTP server for beacons, exposing the
-// /healthz and /metrics endpoints.
+// /healthz, /state and /metrics endpoints.
 package server
 
 import (
@@ -10,12 +10,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/16bitowl/beacons/internal/model"
 	"github.com/16bitowl/beacons/internal/registry"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Server is an HTTP server exposing /healthz and /metrics.
+// Server is an HTTP server exposing /healthz, /state and /metrics.
 type Server struct {
 	addr    string
 	store   registry.Store
@@ -29,6 +30,7 @@ func New(addr string, store registry.Store, gatherer prometheus.Gatherer) *Serve
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/state", s.handleState)
 	mux.Handle("/metrics", promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{}))
 	s.handler = mux
 
@@ -90,5 +92,31 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(healthResponse{
 		Status:  "ok",
 		Records: len(records),
+	})
+}
+
+// stateResponse is the JSON body returned by /state.
+type stateResponse struct {
+	Count   int            `json:"count"`
+	Records []model.Record `json:"records"`
+}
+
+// handleState returns the full current state as JSON, independent of the
+// backing store type. It is unauthenticated; intended for local use only.
+func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
+	records, err := s.store.List()
+	if err != nil {
+		slog.Warn("state: store list failed",
+			"err", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":"error"}`))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(stateResponse{
+		Count:   len(records),
+		Records: records,
 	})
 }
