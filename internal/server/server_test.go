@@ -33,10 +33,10 @@ func doRequestWithKey(srv *Server, path, key string) *httptest.ResponseRecorder 
 // failStore is a Store whose List always errors, for exercising error paths.
 type failStore struct{}
 
-func (failStore) Upsert(model.Record) error                      { return nil }
-func (failStore) Delete(string) error                            { return nil }
-func (failStore) DeleteRecord(model.Record) error                { return nil }
-func (failStore) List() ([]model.Record, error)                  { return nil, errors.New("boom") }
+func (failStore) Upsert(model.Record) error                       { return nil }
+func (failStore) Delete(string) error                             { return nil }
+func (failStore) DeleteRecord(model.Record) error                 { return nil }
+func (failStore) List() ([]model.Record, error)                   { return nil, errors.New("boom") }
 func (failStore) ListBySourceName(string) ([]model.Record, error) { return nil, nil }
 
 func TestHandleState(t *testing.T) {

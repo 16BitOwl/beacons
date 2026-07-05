@@ -22,7 +22,7 @@ func NewFileStore(path string) (*FileStore, error) {
 	if err := fs.load(); err != nil {
 		return nil, err
 	}
-	slog.Info("file store initialised", "path", path, "records", len(fs.records))
+	slog.Info("file store initialized", "path", path, "records", len(fs.records))
 	return fs, nil
 }
 

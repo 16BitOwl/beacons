@@ -68,16 +68,16 @@ func TestCircuitBreaker_SuccessResetsCounter(t *testing.T) {
 	tr := Chain(base, CircuitBreaker(CircuitBreakerOptions{MaxAuthFailures: 3}))
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
 
-	tr.RoundTrip(req) //nolint:errcheck — one 401
-	tr.RoundTrip(req) //nolint:errcheck — success, resets counter
+	tr.RoundTrip(req) //nolint:errcheck // one 401
+	tr.RoundTrip(req) //nolint:errcheck // success, resets counter
 
 	// Two more 401s: counter is back at 0 so the circuit should not trip yet.
 	base2 := roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return fakeResponse(http.StatusUnauthorized), nil
 	})
 	tr2 := Chain(base2, CircuitBreaker(CircuitBreakerOptions{MaxAuthFailures: 3}))
-	tr2.RoundTrip(req) //nolint:errcheck
-	tr2.RoundTrip(req) //nolint:errcheck
+	tr2.RoundTrip(req)              //nolint:errcheck
+	tr2.RoundTrip(req)              //nolint:errcheck
 	resp, err := tr2.RoundTrip(req) // third 401 — should trip now
 	if err != nil {
 		t.Fatalf("third 401: %v", err)

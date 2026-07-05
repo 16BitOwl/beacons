@@ -81,10 +81,10 @@ func TestParseLabels_SingleRecord(t *testing.T) {
 
 func TestParseLabels_TypeUppercased(t *testing.T) {
 	labels := map[string]string{
-		"dns.enable":          "true",
-		"dns.alias.cf.type":   "cname",
-		"dns.alias.cf.name":   "alias.example.com",
-		"dns.alias.cf.value":  "target.example.com",
+		"dns.enable":         "true",
+		"dns.alias.cf.type":  "cname",
+		"dns.alias.cf.name":  "alias.example.com",
+		"dns.alias.cf.value": "target.example.com",
 	}
 	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
 	if err != nil {
@@ -173,11 +173,11 @@ func TestParseLabels_PerRecordTTLOverride(t *testing.T) {
 
 func TestParseLabels_PriorityLabel(t *testing.T) {
 	labels := map[string]string{
-		"dns.enable":            "true",
-		"dns.mail.cf.type":      "MX",
-		"dns.mail.cf.name":      "example.com",
-		"dns.mail.cf.value":     "mail.example.com",
-		"dns.mail.cf.priority":  "10",
+		"dns.enable":           "true",
+		"dns.mail.cf.type":     "MX",
+		"dns.mail.cf.name":     "example.com",
+		"dns.mail.cf.value":    "mail.example.com",
+		"dns.mail.cf.priority": "10",
 	}
 	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
 	if err != nil {
@@ -222,12 +222,12 @@ func TestParseLabels_InvalidRecordErrorsInStrictMode(t *testing.T) {
 
 func TestParseLabels_LabelsWithoutDNSPrefixIgnored(t *testing.T) {
 	labels := map[string]string{
-		"dns.enable":            "true",
-		"com.docker.compose.x":  "irrelevant",
-		"traefik.enable":        "true",
-		"dns.web.cf.type":       "A",
-		"dns.web.cf.name":       "web.example.com",
-		"dns.web.cf.value":      "1.2.3.4",
+		"dns.enable":           "true",
+		"com.docker.compose.x": "irrelevant",
+		"traefik.enable":       "true",
+		"dns.web.cf.type":      "A",
+		"dns.web.cf.name":      "web.example.com",
+		"dns.web.cf.value":     "1.2.3.4",
 	}
 	records, err := parseLabels("src", "aabbccddeeff", labels, model.BaseRecord{}, false)
 	if err != nil {
@@ -305,8 +305,8 @@ func TestParseLabels_EnabledButNoRecordLabels(t *testing.T) {
 func TestParseLabels_MalformedLabelIgnored(t *testing.T) {
 	// Labels with fewer than 3 parts after the "dns." prefix are silently ignored.
 	labels := map[string]string{
-		"dns.enable":   "true",
-		"dns.tooshort": "value", // only 1 part — ignored
+		"dns.enable":       "true",
+		"dns.tooshort":     "value", // only 1 part — ignored
 		"dns.web.cf.type":  "A",
 		"dns.web.cf.name":  "web.example.com",
 		"dns.web.cf.value": "1.2.3.4",

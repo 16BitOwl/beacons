@@ -84,7 +84,7 @@ type UpstreamHTTPConfig struct {
 	DebugLog bool `yaml:"debug_log"`
 
 	// DebugLogSecrets disables header redaction in debug logs and, for PiHole,
-	// also logs the authentication exchange. Only honoured with DebugLog.
+	// also logs the authentication exchange. Only honored with DebugLog.
 	DebugLogSecrets bool `yaml:"debug_log_secrets"`
 }
 

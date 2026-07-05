@@ -80,7 +80,7 @@ func TestRequired_Int(t *testing.T) {
 	type S struct {
 		V int `validate:"required"`
 	}
-	mustErrors(t, validate.Struct(&S{V: 0}))
+	_ = mustErrors(t, validate.Struct(&S{V: 0}))
 	mustPass(t, validate.Struct(&S{V: 1}))
 	mustPass(t, validate.Struct(&S{V: -1}))
 }
@@ -89,7 +89,7 @@ func TestRequired_Bool(t *testing.T) {
 	type S struct {
 		V bool `validate:"required"`
 	}
-	mustErrors(t, validate.Struct(&S{V: false}))
+	_ = mustErrors(t, validate.Struct(&S{V: false}))
 	mustPass(t, validate.Struct(&S{V: true}))
 }
 
@@ -97,7 +97,7 @@ func TestRequired_Slice(t *testing.T) {
 	type S struct {
 		V []string `validate:"required"`
 	}
-	mustErrors(t, validate.Struct(&S{V: nil}))
+	_ = mustErrors(t, validate.Struct(&S{V: nil}))
 	mustErrors(t, validate.Struct(&S{V: []string{}}))
 	mustPass(t, validate.Struct(&S{V: []string{"x"}}))
 }

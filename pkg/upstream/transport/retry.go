@@ -16,7 +16,7 @@ const (
 	defaultMaxDelay    = 30 * time.Second
 )
 
-// RetryOptions configures retry behaviour.
+// RetryOptions configures retry behavior.
 // Zero values fall back to sensible defaults.
 type RetryOptions struct {
 	// MaxAttempts is the total number of attempts including the first. Default: 3.
@@ -44,7 +44,7 @@ func (o RetryOptions) withDefaults() RetryOptions {
 // backoff and ±25% jitter.
 //
 // Retried conditions: network errors, HTTP 429, 500, 502, 503, 504.
-// On HTTP 429, the Retry-After response header is honoured if present, capped
+// On HTTP 429, the Retry-After response header is honored if present, capped
 // at MaxDelay.
 // Errors wrapping [ErrAuthFailed] are permanent and never retried.
 //

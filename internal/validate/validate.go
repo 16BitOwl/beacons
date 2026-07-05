@@ -44,7 +44,7 @@ func Struct(v any) error {
 // files) where the caller has meaningful location context to include.
 func StructWithPrefix(v any, prefix string) error {
 	rv := reflect.ValueOf(v)
-	for rv.Kind() == reflect.Ptr {
+	for rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
 			return nil
 		}
@@ -76,7 +76,7 @@ func walkStruct(rv reflect.Value, path string) ValidationErrors {
 		fpath := fieldPath(path, field)
 
 		// Dereference pointer fields; skip nil pointers entirely.
-		if fv.Kind() == reflect.Ptr {
+		if fv.Kind() == reflect.Pointer {
 			if fv.IsNil() {
 				// Still apply validate tags (e.g. required_if) on the pointer itself.
 				errs = append(errs, applyRules(fv, rv, fpath, field.Tag.Get("validate"))...)

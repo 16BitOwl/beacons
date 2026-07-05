@@ -611,7 +611,7 @@ func TestDeleteRecord_Failures_IncrementsOnEachRetry(t *testing.T) {
 	}
 
 	// Second failure — counter must increment again.
-	s.deleteRecord(context.Background(), records[0])
+	_ = s.deleteRecord(context.Background(), records[0])
 	records, _ = store.List()
 	if records[0].Failures != 2 {
 		t.Errorf("failures after 2nd attempt = %d, want 2", records[0].Failures)
@@ -629,7 +629,7 @@ func TestDeleteRecord_SuccessAfterFailures_ResetsCounter(t *testing.T) {
 	_ = store.Upsert(r)
 
 	// Upstream now succeeds.
-	s.deleteRecord(context.Background(), r)
+	_ = s.deleteRecord(context.Background(), r)
 
 	records, _ := store.List()
 	if len(records) != 0 {

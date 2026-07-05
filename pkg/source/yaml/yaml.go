@@ -63,7 +63,13 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 	if err != nil {
 		return err
 	}
-	defer watcher.Close()
+	defer func() {
+		if err := watcher.Close(); err != nil {
+			slog.Debug("yaml watcher close failed",
+				"source", s.name,
+				"err", err)
+		}
+	}()
 
 	// Watch the directories that match the glob pattern. If nothing matches
 	// yet, fall back to the glob's static prefix so new files are still seen.

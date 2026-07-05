@@ -81,7 +81,7 @@ func main() {
 	for name, ucfg := range cfg.Upstreams {
 		u, err := buildUpstream(ctx, name, ucfg)
 		if err != nil {
-			slog.Error("upstream failed to initialise, disabling until restart; fix the configuration and restart Beacons",
+			slog.Error("upstream failed to initialize, disabling until restart; fix the configuration and restart Beacons",
 				"name", name,
 				"err", err)
 			upstreams[name] = upstream.NewDisabled(name, err)
@@ -117,14 +117,14 @@ func main() {
 
 	store, err := buildStore(cfg.Store)
 	if err != nil {
-		slog.Error("failed to initialise store",
+		slog.Error("failed to initialize store",
 			"err", err)
 		os.Exit(1)
 	}
 
 	// Set up Prometheus registry and metrics.
 	reg := prometheus.NewRegistry()
-	reg.MustRegister(collectors.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	m := metrics.New(reg)
 
 	retryInterval := time.Duration(cfg.Sync.RetryInterval) * time.Second
@@ -162,7 +162,7 @@ func main() {
 			APIKey: cfg.HTTP.Auth.APIKey,
 		})
 		if err != nil {
-			slog.Error("failed to initialise http auth",
+			slog.Error("failed to initialize http auth",
 				"err", err)
 			os.Exit(1)
 		}

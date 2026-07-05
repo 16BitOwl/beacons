@@ -20,7 +20,7 @@ type Config struct {
 	// Upstreams is a map of named upstream adapter instances
 	Upstreams map[string]model.UpstreamConfig `yaml:"upstreams"`
 
-	// Sync controls the sync loop behaviour
+	// Sync controls the sync loop behavior
 	Sync SyncConfig `yaml:"sync"`
 
 	// Store controls record persistence
@@ -30,11 +30,11 @@ type Config struct {
 	// Leave Addr empty to disable the server entirely.
 	HTTP HTTPConfig `yaml:"http"`
 
-	// Log controls logging behaviour.
+	// Log controls logging behavior.
 	Log LogConfig `yaml:"log"`
 }
 
-// LogConfig controls logging behaviour.
+// LogConfig controls logging behavior.
 type LogConfig struct {
 	// RevealValues includes env-override values in debug logs, which otherwise
 	// log keys only. Those values might be secrets (API tokens, passwords), so it

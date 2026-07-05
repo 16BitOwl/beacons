@@ -72,7 +72,7 @@ func New(ctx context.Context, opts Options) (*Upstream, error) {
 		baseURL: apiBase,
 	}
 
-	slog.Debug("cloudflare upstream initialised",
+	slog.Debug("cloudflare upstream initialized",
 		"upstream", opts.Name,
 		"zone", zone.Name)
 	return &Upstream{name: opts.Name, client: c, zoneName: zone.Name}, nil

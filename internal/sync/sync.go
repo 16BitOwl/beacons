@@ -41,7 +41,7 @@ func New(opts Options) *Syncer {
 	}
 }
 
-// Run starts all sources and processes their events until ctx is cancelled.
+// Run starts all sources and processes their events until ctx is canceled.
 func (s *Syncer) Run(ctx context.Context, sources []source.Source) error {
 	ch := make(chan source.Event, 64)
 
