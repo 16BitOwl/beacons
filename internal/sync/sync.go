@@ -96,6 +96,8 @@ func (s *Syncer) handle(ctx context.Context, ev source.Event) {
 // to this source that are absent — cleaning up both the store and the upstream.
 // This is the mechanism that handles containers (or files) removed while Beacons
 // was offline.
+// Orphan detection is keyed on the full record key (sourceID, recordID,
+// upstream) — the same key the store uses.
 func (s *Syncer) handleSync(ctx context.Context, ev source.Event) {
 	slog.Debug("processing sync event",
 		"source", ev.SourceName,
@@ -110,32 +112,31 @@ func (s *Syncer) handleSync(ctx context.Context, ev source.Event) {
 		return
 	}
 
-	// Build the set of sourceIDs present in the incoming snapshot.
-	activeSourceIDs := make(map[string]struct{}, len(ev.Records))
+	// Build the set of record keys present in the incoming snapshot.
+	activeKeys := make(map[string]struct{}, len(ev.Records))
 	for _, r := range ev.Records {
-		activeSourceIDs[r.SourceID] = struct{}{}
+		activeKeys[recordKey(r)] = struct{}{}
 	}
 
-	// Find orphaned sourceIDs: present in the store but absent from the snapshot.
-	orphanedSourceIDs := make(map[string]struct{})
+	// Find orphaned records: present in the store but absent from the snapshot.
+	var orphaned []model.Record
 	for _, r := range existing {
-		if _, ok := activeSourceIDs[r.SourceID]; !ok {
-			orphanedSourceIDs[r.SourceID] = struct{}{}
+		if _, ok := activeKeys[recordKey(r)]; !ok {
+			orphaned = append(orphaned, r)
 		}
 	}
 
 	// Delete orphaned records from upstreams and remove successful ones from the
 	// store. Records whose upstream delete fails are marked pending_delete so
 	// the retry loop re-attempts them independently of the next sync cycle.
-	if len(orphanedSourceIDs) > 0 {
+	// Deletion runs before the upsert loop so a renamed record's old entry is
+	// removed before its replacement is pushed.
+	if len(orphaned) > 0 {
 		slog.Info("sync: removing orphaned records",
 			"source", ev.SourceName,
-			"orphaned_source_count", len(orphanedSourceIDs))
+			"orphaned_count", len(orphaned))
 
-		for _, r := range existing {
-			if _, ok := orphanedSourceIDs[r.SourceID]; !ok {
-				continue
-			}
+		for _, r := range orphaned {
 			slog.Info("sync: deleting orphaned record",
 				"source", ev.SourceName,
 				"source_id", shortID(r.SourceID),
@@ -354,6 +355,12 @@ func (s *Syncer) retryFailed(ctx context.Context) {
 			s.deleteRecord(ctx, r)
 		}
 	}
+}
+
+// recordKey returns the storage key identifying a record, matching the
+// registry Store's (sourceID, recordID, upstream) key.
+func recordKey(r model.Record) string {
+	return r.SourceID + "/" + r.ID + "/" + r.Upstream
 }
 
 // shortID returns up to 12 characters of an ID for log readability.
