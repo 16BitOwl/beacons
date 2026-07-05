@@ -209,15 +209,15 @@ func TestMultipleDynamicMapEntries(t *testing.T) {
 // TestEnvOnlyConfig verifies a complete config can be built with no file at all.
 func TestEnvOnlyConfig(t *testing.T) {
 	setenv(t, map[string]string{
-		"BEACONS_DEFAULTS_TTL":                    "120",
-		"BEACONS_SYNC_POLL_INTERVAL":              "30",
-		"BEACONS_SYNC_USE_EVENTS":                 "true",
-		"BEACONS_STORE_TYPE":                      "file",
-		"BEACONS_STORE_PATH":                      "/data/state.json",
-		"BEACONS_UPSTREAMS__CF__TYPE":             "cloudflare",
-		"BEACONS_UPSTREAMS__CF__API_TOKEN":        "tok",
-		"BEACONS_UPSTREAMS__CF__ZONE_ID":          "z1",
-		"BEACONS_SOURCES__DOCKER__TYPE":           "docker",
+		"BEACONS_DEFAULTS_TTL":             "120",
+		"BEACONS_SYNC_POLL_INTERVAL":       "30",
+		"BEACONS_SYNC_USE_EVENTS":          "true",
+		"BEACONS_STORE_TYPE":               "file",
+		"BEACONS_STORE_PATH":               "/data/state.json",
+		"BEACONS_UPSTREAMS__CF__TYPE":      "cloudflare",
+		"BEACONS_UPSTREAMS__CF__API_TOKEN": "tok",
+		"BEACONS_UPSTREAMS__CF__ZONE_ID":   "z1",
+		"BEACONS_SOURCES__DOCKER__TYPE":    "docker",
 	})
 
 	cfg, err := Load("")
