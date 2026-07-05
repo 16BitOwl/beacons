@@ -42,6 +42,16 @@ cp beacons.example.yaml beacons.yaml
 
 Environment variables follow the pattern `BEACONS_<YAML_PATH>`, e.g. `BEACONS_SYNC_DRY_RUN=true`. Map keys (upstreams, sources) use double-underscore delimiters: `BEACONS_UPSTREAMS__CF_ZONE_A__API_TOKEN`.
 
+### Debug logging
+
+Each upstream accepts two development-only flags under `http`, both of which also require `BEACONS_LOG_LEVEL=debug` to take effect:
+
+- `debug_log`: logs full request/response bodies for that upstream. Auth headers and tokens are redacted.
+- `debug_log_secrets`: disables that redaction and, for Pi-hole, also logs the authentication exchange.
+
+> [!WARNING]
+> `debug_log_secrets` writes API tokens and passwords to the logs in plaintext. Use it only for local troubleshooting, never in production or anywhere logs are shipped or retained.
+
 ## Docker labels
 
 ```yaml
