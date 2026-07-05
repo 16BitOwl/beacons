@@ -48,6 +48,21 @@ type HTTPConfig struct {
 	// ShutdownTimeout configure the HTTP server read timeout
 	// in seconds, must be none zero
 	ShutdownTimeout int `yaml:"shutdown_timeout" validate:"gt=0"`
+
+	// Auth configures authentication for protected endpoints (currently /state).
+	Auth AuthConfig `yaml:"auth"`
+}
+
+// AuthConfig selects and configures the authentication method for protected
+// HTTP endpoints. Type is pluggable so other methods can be added later.
+type AuthConfig struct {
+	// Type is the auth method: "none" or "api_key".
+	Type string `yaml:"type" validate:"omitempty,oneof=none api_key"`
+
+	// APIKey is the shared secret required when Type is "api_key", sent via
+	// the X-API-Key header. If empty, a random key is generated at startup
+	// and printed to stdout — set this explicitly outside of local testing.
+	APIKey string `yaml:"api_key"`
 }
 
 // StoreConfig controls how records are persisted between restarts.
@@ -105,6 +120,7 @@ func defaults() Config {
 			ReadTimeout:     5,
 			IdleTimeout:     60,
 			ShutdownTimeout: 5,
+			Auth:            AuthConfig{Type: "api_key"},
 		},
 	}
 }

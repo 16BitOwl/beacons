@@ -1,0 +1,19 @@
+info:
+  name: Get state
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{host}}/state"
+  auth:
+    type: apikey
+    key: "{{api_key_name}}"
+    value: "{{api_key_value}}"
+    placement: header
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

@@ -1,0 +1,8 @@
+name: Local
+variables:
+  - name: host
+    value: http://localhost:9090
+  - secret: true
+    name: api_key_value
+  - name: api_key_name
+    value: X-API-Key

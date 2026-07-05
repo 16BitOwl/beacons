@@ -132,11 +132,27 @@ func main() {
 		"debounce_delay", debounceDelay,
 		"retry_interval", retryInterval,
 		"http_addr", cfg.HTTP.Addr,
+		"http_auth_type", cfg.HTTP.Auth.Type,
 	)
 
 	// Start the HTTP server if configured.
 	if cfg.HTTP.Addr != "" {
-		srv := server.New(cfg.HTTP.Addr, store, reg)
+		auth, err := server.NewAuthenticator(server.AuthConfig{
+			Type:   cfg.HTTP.Auth.Type,
+			APIKey: cfg.HTTP.Auth.APIKey,
+		})
+		if err != nil {
+			slog.Error("failed to initialise http auth",
+				"err", err)
+			os.Exit(1)
+		}
+
+		srv := server.New(server.Options{
+			Addr:     cfg.HTTP.Addr,
+			Store:    store,
+			Gatherer: reg,
+			Auth:     auth,
+		})
 		go func() {
 			if err := srv.Run(ctx, server.Timeouts{
 				ReadTimeout:     time.Duration(cfg.HTTP.ReadTimeout) * time.Second,

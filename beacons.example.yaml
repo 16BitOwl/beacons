@@ -25,10 +25,14 @@ defaults:
   comment: "managed by beacons"  # applied to all records unless overridden per-record or per-upstream
 
 http:
-  addr: ":9090"       # expose /healthz and /metrics; omit or leave empty to disable
+  addr: ":9090"       # expose HTTP endpoints; omit or leave empty to disable
   read_timeout: 5     # read timeout in seconds; 0 or omit to disable
   idle_timeout: 30    # idle timeout in seconds; 0 or omit to disable
   shutdown_timeout: 5 # server shutdown timeout in seconds, must be larger than 0
+  auth:
+    type: api_key     # "api_key" (default) or "none"; protects secured endpoints
+    api_key: ""       # shared secret sent via the X-API-Key header; if empty, a
+                      # random key is generated and printed to stdout on startup
 
 store:
   type: file   # "memory" (default) or "file"
