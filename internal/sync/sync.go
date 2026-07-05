@@ -142,7 +142,7 @@ func (s *Syncer) handleSync(ctx context.Context, ev source.Event) {
 				"source_id", shortID(r.SourceID),
 				"record", r.ID,
 				"name", r.Name)
-			s.deleteRecord(ctx, r)
+			_ = s.deleteRecord(ctx, r) // failure already handled internally (marks pending_delete)
 		}
 	}
 
@@ -352,7 +352,7 @@ func (s *Syncer) retryFailed(ctx context.Context) {
 	if len(toDelete) > 0 {
 		slog.Info("retrying pending delete records", "count", len(toDelete))
 		for _, r := range toDelete {
-			s.deleteRecord(ctx, r)
+			_ = s.deleteRecord(ctx, r) // failure already handled internally (marks pending_delete)
 		}
 	}
 }

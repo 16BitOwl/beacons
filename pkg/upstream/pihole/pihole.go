@@ -262,7 +262,7 @@ func applyByName(entries []string, name, entry string, remove bool, nameOf func(
 	}
 	out = append(out, entry)
 	// Unchanged only when the sole existing entry for the name already matches.
-	return out, !(exact && owned == 1)
+	return out, !exact || owned != 1
 }
 
 // hostName returns the hostname from a "IP hostname" hosts entry. Beacons writes

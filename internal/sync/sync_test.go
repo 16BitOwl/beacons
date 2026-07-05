@@ -604,7 +604,7 @@ func TestDeleteRecord_Failures_IncrementsOnEachRetry(t *testing.T) {
 
 	// First failure.
 	records, _ := store.List()
-	s.deleteRecord(context.Background(), records[0])
+	_ = s.deleteRecord(context.Background(), records[0])
 	records, _ = store.List()
 	if records[0].Failures != 1 {
 		t.Fatalf("failures after 1st attempt = %d, want 1", records[0].Failures)

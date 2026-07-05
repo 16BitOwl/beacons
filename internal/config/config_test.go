@@ -25,7 +25,9 @@ func loadYAML(t *testing.T, yaml string) *Config {
 	if _, err := f.WriteString(yaml); err != nil {
 		t.Fatalf("write temp file: %v", err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatalf("close temp file: %v", err)
+	}
 	cfg, err := Load(f.Name())
 	if err != nil {
 		t.Fatalf("Load: %v", err)

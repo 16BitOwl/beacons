@@ -72,7 +72,7 @@ func TestRequired_String(t *testing.T) {
 	type S struct {
 		V string `validate:"required"`
 	}
-	mustErrors(t, validate.Struct(&S{V: ""}))
+	_ = mustErrors(t, validate.Struct(&S{V: ""}))
 	mustPass(t, validate.Struct(&S{V: "hello"}))
 }
 
@@ -695,21 +695,7 @@ func TestValidatable_CustomRuleWithPrefix(t *testing.T) {
 }
 
 func TestValidatable_CustomAndTagErrorsCombined(t *testing.T) {
-	type S struct {
-		Type  string `yaml:"type"  validate:"required"`
-		Value string `yaml:"value"`
-	}
-	// Embed customValidated to get both tag errors and Validatable errors in one struct.
-	// Instead, use a struct that has both tag rules and implements Validatable.
-	// We verify this via customValidated with a required tag on Type.
-	type WithRequired struct {
-		Type  string `yaml:"type"  validate:"required"`
-		Value string `yaml:"value"`
-	}
-	// This struct doesn't implement Validatable, so no custom errors — just verify
-	// tag errors work alongside the interface by using the customValidated type with a tag.
-	_ = S{}
-	// Direct test: customValidated has no validate tags but does implement Validatable.
+	// customValidated has no validate tags but does implement Validatable.
 	// Errors from Validatable are included alongside any tag errors.
 	err := validate.Struct(&customValidated{Type: "special", Value: ""})
 	ve := mustErrors(t, err)

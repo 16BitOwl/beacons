@@ -27,6 +27,7 @@ import (
 	upstreampihole "github.com/16bitowl/beacons/pkg/upstream/pihole"
 	"github.com/16bitowl/beacons/pkg/upstream/transport"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
 // version and buildTime are set via -ldflags at build time.
@@ -123,7 +124,7 @@ func main() {
 
 	// Set up Prometheus registry and metrics.
 	reg := prometheus.NewRegistry()
-	reg.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	reg.MustRegister(collectors.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	m := metrics.New(reg)
 
 	retryInterval := time.Duration(cfg.Sync.RetryInterval) * time.Second

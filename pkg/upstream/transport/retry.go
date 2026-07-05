@@ -132,7 +132,7 @@ func isRetryable(code int) bool {
 }
 
 // calcDelay returns the backoff duration for a given attempt (1-based).
-// It honours the Retry-After header on 429 responses when available, capped at
+// It honors the Retry-After header on 429 responses when available, capped at
 // opts.MaxDelay.
 func calcDelay(attempt int, resp *http.Response, opts RetryOptions) time.Duration {
 	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
