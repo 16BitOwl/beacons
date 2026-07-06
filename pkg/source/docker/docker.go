@@ -182,13 +182,30 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 	}
 }
 
-// poll scans all running containers and emits a single EventSync containing
-// every DNS record found. The syncer uses this to detect and clean up records
-// from containers that are no longer running.
+// poll builds a snapshot and emits it as a single EventSync. The syncer uses
+// this to detect and clean up records from containers that are no longer running.
 func (s *Source) poll(ctx context.Context, ch chan<- source.Event) error {
-	listed, err := s.client.ContainerList(ctx, dockerclient.ContainerListOptions{})
+	records, err := s.Snapshot(ctx)
 	if err != nil {
 		return err
+	}
+	ch <- source.Event{
+		Type:       source.EventSync,
+		SourceName: s.name,
+		Records:    records,
+	}
+	return nil
+}
+
+// Snapshot lists all running containers and returns every DNS record found. It
+// returns a non-nil error on a Docker API failure so the caller keeps the last
+// good state; a successful scan that finds no records returns a nil slice and a
+// nil error. Per-container label validation failures are logged and skipped, not
+// propagated, so one bad container never voids the whole snapshot.
+func (s *Source) Snapshot(ctx context.Context) ([]model.Record, error) {
+	listed, err := s.client.ContainerList(ctx, dockerclient.ContainerListOptions{})
+	if err != nil {
+		return nil, err
 	}
 
 	var records []model.Record
@@ -211,18 +228,75 @@ func (s *Source) poll(ctx context.Context, ch chan<- source.Event) error {
 		records = append(records, recs...)
 	}
 
-	slog.Info("docker poll complete",
+	slog.Info("docker snapshot complete",
 		"source", s.name,
 		"containers_with_records", uniqueSourceIDs(records),
 		"total_containers", len(listed.Items),
 		"total_records", len(records))
 
-	ch <- source.Event{
-		Type:       source.EventSync,
-		SourceName: s.name,
-		Records:    records,
+	return records, nil
+}
+
+// Notify subscribes to Docker container events and/or a poll ticker and signals
+// ch whenever container state may have changed, prompting the reconciler to
+// re-snapshot. It returns when ctx is canceled and does not close ch. Because
+// Snapshot re-reads all containers, no per-container debouncing is needed here;
+// the reconciler coalesces signals across sources.
+func (s *Source) Notify(ctx context.Context, ch chan<- struct{}) {
+	var pollC <-chan time.Time
+	if s.pollInterval > 0 {
+		t := time.NewTicker(s.pollInterval)
+		defer t.Stop()
+		pollC = t.C
 	}
-	return nil
+
+	var eventsResult dockerclient.EventsResult
+	var resubC <-chan time.Time
+	subscribe := func() {
+		f := make(dockerclient.Filters).Add("type", "container")
+		eventsResult = s.client.Events(ctx, dockerclient.EventsListOptions{Filters: f})
+	}
+	if s.useEvents {
+		subscribe()
+	}
+
+	signal := func() {
+		select {
+		case ch <- struct{}{}:
+		case <-ctx.Done():
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case err := <-eventsResult.Err:
+			// The client sends at most one error and closes Err; drop the channels
+			// and schedule a reopen so a closed channel can't spin the loop.
+			eventsResult = dockerclient.EventsResult{}
+			if ctx.Err() != nil {
+				continue
+			}
+			slog.Error("docker event stream lost, resubscribing",
+				"source", s.name,
+				"retry_in", eventResubscribeDelay,
+				"err", err)
+			resubC = time.After(eventResubscribeDelay)
+		case <-resubC:
+			resubC = nil
+			subscribe()
+			signal() // re-snapshot to catch anything missed while the stream was down
+		case msg := <-eventsResult.Messages:
+			switch msg.Action {
+			case dockerevents.ActionStart, dockerevents.ActionDie,
+				dockerevents.ActionStop, dockerevents.ActionKill:
+				signal()
+			}
+		case <-pollC:
+			signal()
+		}
+	}
 }
 
 func (s *Source) handleEvent(ctx context.Context, msg dockerevents.Message, ch chan<- source.Event) {
