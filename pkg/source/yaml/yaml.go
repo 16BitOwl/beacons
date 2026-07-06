@@ -134,32 +134,43 @@ func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
 	}
 }
 
-// loadAll reads all files matching the glob and emits a single EventSync
-// containing every record found. If a previously loaded file has been deleted
-// or no longer matches, its records will be absent from the snapshot and the
-// syncer will clean them up.
-//
-// A read failure (glob error or any file that fails to parse) must never be
-// mistaken for "no records": emitting a partial or empty snapshot would make the
-// syncer orphan-delete live records. On any such error loadAll logs and returns
-// without emitting, leaving the last good state in place until a clean read.
+// loadAll builds a snapshot and emits it as a single EventSync. On a read/parse
+// error it logs and returns without emitting, leaving the last good state in
+// place until a clean read. A clean read with no records emits an empty sync so
+// the syncer removes any previously stored records.
 func (s *Source) loadAll(ch chan<- source.Event) {
-	files, err := filepath.Glob(s.glob)
+	records, err := s.Snapshot(context.Background())
 	if err != nil {
-		slog.Error("yaml glob failed, skipping reload to preserve live records",
+		slog.Error("yaml snapshot failed, skipping reload to preserve live records",
 			"source", s.name,
-			"glob", s.glob,
 			"err", err)
 		return
+	}
+	ch <- source.Event{
+		Type:       source.EventSync,
+		SourceName: s.name,
+		Records:    records,
+	}
+}
+
+// Snapshot reads every file matching the glob and returns all records found.
+//
+// A read failure (glob error or any file that fails to parse) must never be
+// mistaken for "no records": it returns a non-nil error so the caller keeps the
+// last good state. A clean read that matches no files returns a nil slice and a
+// nil error — a legitimate "nothing desired." ctx is unused today but part of
+// the Snapshotter contract.
+func (s *Source) Snapshot(_ context.Context) ([]model.Record, error) {
+	files, err := filepath.Glob(s.glob)
+	if err != nil {
+		return nil, fmt.Errorf("glob %q: %w", s.glob, err)
 	}
 
 	if len(files) == 0 {
 		slog.Warn("yaml source found no files matching glob",
 			"source", s.name,
 			"glob", s.glob)
-		// Emit an empty sync so the syncer removes any previously stored records.
-		ch <- source.Event{Type: source.EventSync, SourceName: s.name}
-		return
+		return nil, nil
 	}
 
 	slog.Debug("yaml source loading files",
@@ -170,13 +181,7 @@ func (s *Source) loadAll(ch chan<- source.Event) {
 	for _, f := range files {
 		records, err := parseFile(s.name, f, s.defaults, s.strict, s.strictValidation)
 		if err != nil {
-			// A partial snapshot would orphan-delete this file's records; skip
-			// the whole reload and keep the last good state.
-			slog.Error("yaml parse failed, skipping reload to preserve live records",
-				"source", s.name,
-				"file", f,
-				"err", err)
-			return
+			return nil, fmt.Errorf("parse %q: %w", f, err)
 		}
 		if len(records) > 0 {
 			slog.Info("yaml file loaded",
@@ -187,10 +192,81 @@ func (s *Source) loadAll(ch chan<- source.Event) {
 		}
 	}
 
-	ch <- source.Event{
-		Type:       source.EventSync,
-		SourceName: s.name,
-		Records:    allRecords,
+	return allRecords, nil
+}
+
+// Notify watches the glob's directories and signals ch whenever a matching file
+// changes, debounced so a signal fires once the write settles. It returns when
+// ctx is canceled and does not close ch. Mirrors Run's watch loop.
+func (s *Source) Notify(ctx context.Context, ch chan<- struct{}) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		slog.Error("yaml notify: watcher init failed",
+			"source", s.name,
+			"err", err)
+		return
+	}
+	defer func() {
+		if err := watcher.Close(); err != nil {
+			slog.Debug("yaml watcher close failed",
+				"source", s.name,
+				"err", err)
+		}
+	}()
+
+	dirs, err := globDirs(s.glob)
+	if err != nil {
+		slog.Error("yaml glob dirs failed",
+			"source", s.name,
+			"glob", s.glob,
+			"err", err)
+	}
+	if len(dirs) == 0 {
+		dirs = []string{staticGlobDir(s.glob)}
+	}
+	for _, d := range dirs {
+		if err := watcher.Add(d); err != nil {
+			slog.Error("yaml watcher add failed",
+				"source", s.name,
+				"dir", d,
+				"err", err)
+		}
+	}
+
+	var debounce *time.Timer
+	var debounceC <-chan time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			if debounce != nil {
+				debounce.Stop()
+			}
+			return
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			matched, _ := filepath.Match(s.glob, event.Name)
+			if !matched {
+				continue
+			}
+			if debounce == nil {
+				debounce = time.NewTimer(reloadDebounce)
+				debounceC = debounce.C
+			} else {
+				debounce.Reset(reloadDebounce)
+			}
+		case <-debounceC:
+			select {
+			case ch <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+		case err := <-watcher.Errors:
+			slog.Error("yaml watcher error",
+				"source", s.name,
+				"err", err)
+		}
 	}
 }
 
