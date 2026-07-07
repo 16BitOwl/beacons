@@ -29,3 +29,18 @@ type Store interface {
 	// Used by the syncer to find orphaned records during an EventSync.
 	ListBySourceName(sourceName string) ([]model.Record, error)
 }
+
+// Batcher is an optional Store extension for backends whose per-write cost
+// scales with total record count (e.g. FileStore rewrites the whole file on
+// every call). A caller making several mutations as one logical unit — a
+// reconcile pass — should feature-detect Batcher and wrap them in Batch, so
+// the backend can defer its expensive part to a single call instead of one
+// per record. A store that doesn't implement Batcher is assumed cheap enough
+// per write that batching wouldn't help (e.g. MemoryStore).
+type Batcher interface {
+	// Batch runs fn with the store's per-write durability step deferred, then
+	// performs that step once. A logical pass is not one atomic transaction:
+	// whatever fn wrote to in-memory state before returning (error or not) is
+	// still persisted by the deferred step.
+	Batch(fn func() error) error
+}

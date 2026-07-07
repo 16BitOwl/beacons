@@ -45,6 +45,18 @@ func singleOpPlan(kind OpKind, r model.Record) Plan {
 	return Plan{Ops: map[string][]Op{r.Upstream: {{Kind: kind, Record: r}}}}
 }
 
+// batchingStore wraps a Store and counts Batch calls, so tests can verify
+// Executor uses the registry.Batcher extension when the store supports it.
+type batchingStore struct {
+	registry.Store
+	batches int
+}
+
+func (b *batchingStore) Batch(fn func() error) error {
+	b.batches++
+	return fn()
+}
+
 func newTestExecutor(store registry.Store, ups map[string]upstream.Upstream, now func() time.Time, backoff func(int) time.Duration) *Executor {
 	return NewExecutor(ExecutorOptions{
 		Store:     store,
@@ -192,5 +204,26 @@ func TestExecutor_UnknownUpstream(t *testing.T) {
 	e.Apply(context.Background(), singleOpPlan(OpCreate, create), nil)
 	if got, _ := store.List(); len(got) != 0 {
 		t.Errorf("unknown-upstream create should be skipped, got %d", len(got))
+	}
+}
+
+func TestExecutor_ApplyBatchesStoreWritesWhenSupported(t *testing.T) {
+	store := &batchingStore{Store: registry.NewMemoryStore()}
+	up := &fakeUpstream{name: "pihole"}
+	e := newTestExecutor(store, map[string]upstream.Upstream{"pihole": up}, nil, nil)
+
+	plan := Plan{Ops: map[string][]Op{
+		"pihole": {
+			{Kind: OpCreate, Record: rec("yaml", "web", "pihole")},
+			{Kind: OpCreate, Record: rec("yaml", "api", "pihole")},
+		},
+	}}
+	e.Apply(context.Background(), plan, nil)
+
+	if store.batches != 1 {
+		t.Errorf("Batch calls = %d, want 1 (one call regardless of op count)", store.batches)
+	}
+	if got, _ := store.List(); len(got) != 2 {
+		t.Fatalf("expected 2 records written, got %d", len(got))
 	}
 }
