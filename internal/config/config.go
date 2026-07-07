@@ -112,17 +112,8 @@ type SyncConfig struct {
 	// Defaults to false — invalid records are skipped with a warning.
 	StrictValidation bool `yaml:"strict_validation"`
 
-	// RetryInterval is how often (in seconds) the syncer re-attempts records
-	// that previously failed to push to their upstream. 0 disables retries.
-	RetryInterval int `yaml:"retry_interval" validate:"min=0"`
-
-	// Engine selects the sync engine: "syncer" (event-driven, default) or
-	// "reconcile" (declarative reconciler).
-	Engine string `yaml:"engine" validate:"omitempty,oneof=syncer reconcile"`
-
-	// ReconcileInterval is how often (in seconds) the reconcile engine runs a
-	// full pass for self-healing and drift correction. 0 disables the ticker.
-	// Only used when Engine is "reconcile".
+	// ReconcileInterval is how often (in seconds) the reconciler runs a full
+	// pass for self-healing and drift correction. 0 disables the ticker.
 	ReconcileInterval int `yaml:"reconcile_interval" validate:"min=0"`
 }
 
@@ -132,11 +123,9 @@ func defaults() Config {
 		Sync: SyncConfig{
 			PollInterval:      300,
 			DebounceDelay:     500,
-			RetryInterval:     30,
 			DryRun:            false,
 			StrictEnv:         true,
 			UseEvents:         true,
-			Engine:            "syncer",
 			ReconcileInterval: 300,
 		},
 		Store: StoreConfig{

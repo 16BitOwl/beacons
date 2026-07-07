@@ -19,7 +19,6 @@ import (
 	"github.com/16bitowl/beacons/internal/reconcile"
 	"github.com/16bitowl/beacons/internal/registry"
 	"github.com/16bitowl/beacons/internal/server"
-	internalsync "github.com/16bitowl/beacons/internal/sync"
 	"github.com/16bitowl/beacons/pkg/source"
 	sourcedocker "github.com/16bitowl/beacons/pkg/source/docker"
 	sourceyaml "github.com/16bitowl/beacons/pkg/source/yaml"
@@ -128,31 +127,31 @@ func main() {
 	reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	m := metrics.New(reg)
 
-	retryInterval := time.Duration(cfg.Sync.RetryInterval) * time.Second
 	reconcileInterval := time.Duration(cfg.Sync.ReconcileInterval) * time.Second
 
-	// Select the sync engine. The event-driven syncer is the default; the
-	// declarative reconciler is opt-in via sync.engine.
-	engine, err := buildEngine(buildEngineOptions{
-		Engine:            cfg.Sync.Engine,
-		Store:             store,
-		Upstreams:         upstreams,
-		Sources:           sources,
-		RetryInterval:     retryInterval,
-		ReconcileInterval: reconcileInterval,
-		DebounceDelay:     debounceDelay,
-		Metrics:           m,
-	})
-	if err != nil {
-		slog.Error("failed to build sync engine",
-			"err", err)
-		os.Exit(1)
+	snapshotters := make([]source.Snapshotter, 0, len(sources))
+	for _, s := range sources {
+		snap, ok := s.(source.Snapshotter)
+		if !ok {
+			slog.Error("source does not support the reconciler",
+				"name", s.Name())
+			os.Exit(1)
+		}
+		snapshotters = append(snapshotters, snap)
 	}
+	r := reconcile.New(reconcile.Options{
+		Store:          store,
+		Sources:        snapshotters,
+		Upstreams:      upstreams,
+		Interval:       reconcileInterval,
+		DebounceDelay:  debounceDelay,
+		MaxConcurrency: 4,
+		Metrics:        m,
+	})
 
 	slog.Info("beacons starting",
 		"version", version,
 		"build_time", buildTime,
-		"engine", cfg.Sync.Engine,
 		"sources", len(sources),
 		"upstreams", len(upstreams),
 		"store", cfg.Store.Type,
@@ -161,14 +160,13 @@ func main() {
 		"poll_interval", pollInterval,
 		"use_events", cfg.Sync.UseEvents,
 		"debounce_delay", debounceDelay,
-		"retry_interval", retryInterval,
 		"reconcile_interval", reconcileInterval,
 		"http_addr", cfg.HTTP.Addr,
 		"http_auth_type", cfg.HTTP.Auth.Type,
 	)
 
-	// Start the HTTP server if configured. Both it and the syncer are run to
-	// completion before main returns, so shutdown (including the HTTP
+	// Start the HTTP server if configured. Both it and the reconciler are run
+	// to completion before main returns, so shutdown (including the HTTP
 	// server's graceful ShutdownTimeout) is never cut short.
 	var wg sync.WaitGroup
 	var httpErr error
@@ -201,20 +199,20 @@ func main() {
 				httpErr = err
 				slog.Error("http server error, stopping beacons",
 					"err", err)
-				cancel() // treat a listen failure as fatal: stop the syncer too
+				cancel() // treat a listen failure as fatal: stop the reconciler too
 			}
 		}()
 	}
 
-	syncErr := engine(ctx)
-	cancel() // in case the engine exited on its own, make sure the server shuts down too
+	reconcileErr := r.Run(ctx)
+	cancel() // in case the reconciler exited on its own, make sure the server shuts down too
 	wg.Wait()
 
-	if syncErr != nil {
-		slog.Error("sync engine exited with error",
-			"err", syncErr)
+	if reconcileErr != nil {
+		slog.Error("reconciler exited with error",
+			"err", reconcileErr)
 	}
-	if syncErr != nil || httpErr != nil {
+	if reconcileErr != nil || httpErr != nil {
 		os.Exit(1)
 	}
 }
@@ -306,57 +304,6 @@ func httpDebugOptions(name string, cfg model.UpstreamHTTPConfig) transport.Debug
 		Enabled:       cfg.DebugLog,
 		Name:          name,
 		RevealSecrets: cfg.DebugLogSecrets,
-	}
-}
-
-type buildEngineOptions struct {
-	Engine            string
-	Store             registry.Store
-	Upstreams         map[string]upstream.Upstream
-	Sources           []source.Source
-	RetryInterval     time.Duration
-	ReconcileInterval time.Duration
-	DebounceDelay     time.Duration
-	Metrics           *metrics.Metrics
-}
-
-// buildEngine returns the run function for the configured sync engine. Both
-// engines block until ctx is canceled. The event-driven syncer is the default;
-// "reconcile" selects the declarative reconciler.
-func buildEngine(opts buildEngineOptions) (func(context.Context) error, error) {
-	switch opts.Engine {
-	case "reconcile":
-		// Sources must expose the snapshot contract for the reconciler.
-		snapshotters := make([]source.Snapshotter, 0, len(opts.Sources))
-		for _, s := range opts.Sources {
-			snap, ok := s.(source.Snapshotter)
-			if !ok {
-				return nil, fmt.Errorf("source %q does not support the reconcile engine", s.Name())
-			}
-			snapshotters = append(snapshotters, snap)
-		}
-		r := reconcile.New(reconcile.Options{
-			Store:          opts.Store,
-			Sources:        snapshotters,
-			Upstreams:      opts.Upstreams,
-			Interval:       opts.ReconcileInterval,
-			DebounceDelay:  opts.DebounceDelay,
-			MaxConcurrency: 4,
-			Metrics:        opts.Metrics,
-		})
-		return r.Run, nil
-	case "", "syncer":
-		syncer := internalsync.New(internalsync.Options{
-			Store:         opts.Store,
-			Upstreams:     opts.Upstreams,
-			RetryInterval: opts.RetryInterval,
-			Metrics:       opts.Metrics,
-		})
-		return func(ctx context.Context) error {
-			return syncer.Run(ctx, opts.Sources)
-		}, nil
-	default:
-		return nil, fmt.Errorf("unknown sync engine %q", opts.Engine)
 	}
 }
 
