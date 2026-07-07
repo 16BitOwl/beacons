@@ -336,14 +336,12 @@ func buildEngine(opts buildEngineOptions) (func(context.Context) error, error) {
 			snapshotters = append(snapshotters, snap)
 		}
 		r := reconcile.New(reconcile.Options{
-			Store:         opts.Store,
-			Sources:       snapshotters,
-			Upstreams:     opts.Upstreams,
-			Interval:      opts.ReconcileInterval,
-			DebounceDelay: opts.DebounceDelay,
-			// MaxConcurrency stays at 1 until the SessionAuth herd and GetBody
-			// mutation are fixed.
-			MaxConcurrency: 1,
+			Store:          opts.Store,
+			Sources:        snapshotters,
+			Upstreams:      opts.Upstreams,
+			Interval:       opts.ReconcileInterval,
+			DebounceDelay:  opts.DebounceDelay,
+			MaxConcurrency: 4,
 			Metrics:        opts.Metrics,
 		})
 		return r.Run, nil
