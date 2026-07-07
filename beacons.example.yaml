@@ -46,6 +46,8 @@ sync:
   use_events: true    # also watch Docker events in real-time
   dry_run: false      # set to true to log instead of apply
   strict_env: false   # set to true to fail on missing env vars
+  engine: syncer      # sync engine: "syncer" (default) or "reconcile" (declarative; ADR-002)
+  reconcile_interval: 300  # reconcile engine: full-reconcile interval in seconds; 0 disables
 
 # log:
 #   reveal_values: true # DEV ONLY: include env-override values (might be secrets)
