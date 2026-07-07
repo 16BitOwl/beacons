@@ -117,7 +117,7 @@ type SyncConfig struct {
 	RetryInterval int `yaml:"retry_interval" validate:"min=0"`
 
 	// Engine selects the sync engine: "syncer" (event-driven, default) or
-	// "reconcile" (declarative reconciler). See ADR-002.
+	// "reconcile" (declarative reconciler).
 	Engine string `yaml:"engine" validate:"omitempty,oneof=syncer reconcile"`
 
 	// ReconcileInterval is how often (in seconds) the reconcile engine runs a

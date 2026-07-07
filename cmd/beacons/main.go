@@ -132,7 +132,7 @@ func main() {
 	reconcileInterval := time.Duration(cfg.Sync.ReconcileInterval) * time.Second
 
 	// Select the sync engine. The event-driven syncer is the default; the
-	// declarative reconciler is opt-in via sync.engine (ADR-002).
+	// declarative reconciler is opt-in via sync.engine.
 	engine, err := buildEngine(buildEngineOptions{
 		Engine:            cfg.Sync.Engine,
 		Store:             store,
@@ -322,7 +322,7 @@ type buildEngineOptions struct {
 
 // buildEngine returns the run function for the configured sync engine. Both
 // engines block until ctx is canceled. The event-driven syncer is the default;
-// "reconcile" selects the declarative reconciler (ADR-002).
+// "reconcile" selects the declarative reconciler.
 func buildEngine(opts buildEngineOptions) (func(context.Context) error, error) {
 	switch opts.Engine {
 	case "reconcile":
@@ -342,7 +342,7 @@ func buildEngine(opts buildEngineOptions) (func(context.Context) error, error) {
 			Interval:      opts.ReconcileInterval,
 			DebounceDelay: opts.DebounceDelay,
 			// MaxConcurrency stays at 1 until the SessionAuth herd and GetBody
-			// mutation are fixed (ADR-002 item #7).
+			// mutation are fixed.
 			MaxConcurrency: 1,
 			Metrics:        opts.Metrics,
 		})
