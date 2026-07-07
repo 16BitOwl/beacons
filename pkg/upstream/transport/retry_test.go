@@ -183,6 +183,48 @@ func TestRetry_ResettableBody_RetriesNormally(t *testing.T) {
 	}
 }
 
+func TestRetry_DoesNotMutateCallerRequest(t *testing.T) {
+	calls := 0
+	base := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		if calls < 3 {
+			return fakeResponse(http.StatusInternalServerError), nil
+		}
+		return fakeResponse(http.StatusOK), nil
+	})
+
+	tr := Chain(base, Retry(RetryOptions{MaxAttempts: 3, BaseDelay: time.Nanosecond}))
+
+	req, _ := http.NewRequest(http.MethodPost, "http://example.com", strings.NewReader("payload"))
+	originalBody := req.Body
+	originalGetBody := req.GetBody
+
+	if _, err := tr.RoundTrip(req); err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("calls = %d, want 3", calls)
+	}
+
+	// RoundTrip must not modify the caller's request, per the http.RoundTripper
+	// contract: req.Body must still be the original reader, still replayable
+	// via the original GetBody.
+	if req.Body != originalBody {
+		t.Error("req.Body was mutated by Retry; retries must operate on a clone")
+	}
+	if fmt.Sprintf("%p", req.GetBody) != fmt.Sprintf("%p", originalGetBody) {
+		t.Error("req.GetBody was replaced by Retry; retries must operate on a clone")
+	}
+	b, err := req.GetBody()
+	if err != nil {
+		t.Fatalf("GetBody: %v", err)
+	}
+	got, _ := io.ReadAll(b)
+	if string(got) != "payload" {
+		t.Errorf("GetBody() after RoundTrip = %q, want %q (original body still replayable)", got, "payload")
+	}
+}
+
 func TestRetry_NonReplayableBody_ReturnsLastResponse(t *testing.T) {
 	calls := 0
 	base := roundTripFunc(func(*http.Request) (*http.Response, error) {

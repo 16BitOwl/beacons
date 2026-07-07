@@ -59,6 +59,12 @@ type SessionAuthOptions struct {
 // and retries the request a single time. A request whose body cannot be
 // replayed (GetBody == nil) is not retried.
 //
+// Concurrent callers that all get a 401 off the same cached token share one
+// re-authentication: each 401 carries the token generation it was rejected on,
+// and ensureToken only calls Authenticate if the cache is still on that
+// generation. A caller that loses the race just reuses whatever the winner
+// fetched instead of piling another request onto the auth endpoint.
+//
 // Place SessionAuth innermost in the chain (closest to the base transport) so a
 // persistent 401 — one that survives re-authentication — still propagates
 // outward to Retry (which ignores it) and CircuitBreaker (which counts it).
@@ -79,10 +85,14 @@ type sessionAuthTransport struct {
 	token     string
 	expiresAt time.Time
 	haveToken bool
+	// generation counts successful authentications. It starts at 0 (no token
+	// yet); real generations are always >= 1, so 0 doubles as the "don't force
+	// a refresh" sentinel passed from the first ensureToken call in RoundTrip.
+	generation uint64
 }
 
 func (t *sessionAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	token, err := t.ensureToken(req.Context(), false)
+	token, gen, err := t.ensureToken(req.Context(), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +110,7 @@ func (t *sessionAuthTransport) RoundTrip(req *http.Request) (*http.Response, err
 	}
 
 	drainAndClose(resp)
-	token, err = t.ensureToken(req.Context(), true)
+	token, _, err = t.ensureToken(req.Context(), gen)
 	if err != nil {
 		return nil, err
 	}
@@ -126,19 +136,30 @@ func (t *sessionAuthTransport) attempt(req *http.Request, token string) (*http.R
 }
 
 // ensureToken returns a valid cached token, acquiring a new one when the cache
-// is empty, expired, or forceRefresh is set.
-func (t *sessionAuthTransport) ensureToken(ctx context.Context, forceRefresh bool) (string, error) {
+// is empty or expired.
+//
+// invalidateGen is 0 for a plain cache lookup. Otherwise it is the generation
+// the caller's token was rejected on; a refresh is only performed if the
+// cache is still on that generation. If another goroutine already refreshed
+// (the cache has moved to a later generation), the newer cached token is
+// returned as-is — this is what collapses concurrent 401s into one
+// Authenticate call instead of one per caller.
+func (t *sessionAuthTransport) ensureToken(ctx context.Context, invalidateGen uint64) (string, uint64, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if !forceRefresh && t.haveToken && time.Now().Before(t.expiresAt) {
-		return t.token, nil
+	if invalidateGen == 0 {
+		if t.haveToken && time.Now().Before(t.expiresAt) {
+			return t.token, t.generation, nil
+		}
+	} else if invalidateGen != t.generation {
+		return t.token, t.generation, nil
 	}
 
 	sess, err := t.opts.Authenticate(ctx)
 	if err != nil {
 		t.haveToken = false
-		return "", err
+		return "", t.generation, err
 	}
 
 	ttl := sess.ExpiresIn
@@ -152,5 +173,6 @@ func (t *sessionAuthTransport) ensureToken(ctx context.Context, forceRefresh boo
 	t.token = sess.Token
 	t.expiresAt = time.Now().Add(ttl)
 	t.haveToken = true
-	return t.token, nil
+	t.generation++
+	return t.token, t.generation, nil
 }

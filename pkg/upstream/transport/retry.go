@@ -50,6 +50,9 @@ func (o RetryOptions) withDefaults() RetryOptions {
 //
 // Requests with a non-resettable body (GetBody == nil) are not retried after
 // the first attempt.
+//
+// Each retry attempt is sent on a clone of req; the original request passed
+// to RoundTrip is never mutated, per the http.RoundTripper contract.
 func Retry(opts RetryOptions) Middleware {
 	opts = opts.withDefaults()
 	return func(next http.RoundTripper) http.RoundTripper {
@@ -67,6 +70,7 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		resp *http.Response
 		err  error
 	)
+	attemptReq := req
 	for attempt := range t.opts.MaxAttempts {
 		if attempt > 0 {
 			if req.Body != nil && req.GetBody == nil {
@@ -91,9 +95,13 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			resp = nil
 
 			if req.Body != nil {
-				if req.Body, err = req.GetBody(); err != nil {
-					return nil, err
+				body, gbErr := req.GetBody()
+				if gbErr != nil {
+					return nil, gbErr
 				}
+				cloned := req.Clone(req.Context())
+				cloned.Body = body
+				attemptReq = cloned
 			}
 
 			select {
@@ -103,7 +111,7 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			}
 		}
 
-		resp, err = t.next.RoundTrip(req)
+		resp, err = t.next.RoundTrip(attemptReq)
 		if err != nil {
 			if errors.Is(err, ErrAuthFailed) {
 				// Rejected credentials won't heal with a retry; let the error

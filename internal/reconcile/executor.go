@@ -17,7 +17,6 @@ type ExecutorOptions struct {
 	Store     registry.Store
 	Upstreams map[string]upstream.Upstream
 	// MaxConcurrency bounds per-upstream workers; 0 means 1 (serial).
-	// Keep this at 1 until the SessionAuth herd and GetBody mutation are fixed.
 	MaxConcurrency int
 	// Metrics is optional; nil disables metrics recording.
 	Metrics *metrics.Metrics
