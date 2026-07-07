@@ -115,18 +115,29 @@ type SyncConfig struct {
 	// RetryInterval is how often (in seconds) the syncer re-attempts records
 	// that previously failed to push to their upstream. 0 disables retries.
 	RetryInterval int `yaml:"retry_interval" validate:"min=0"`
+
+	// Engine selects the sync engine: "syncer" (event-driven, default) or
+	// "reconcile" (declarative reconciler).
+	Engine string `yaml:"engine" validate:"omitempty,oneof=syncer reconcile"`
+
+	// ReconcileInterval is how often (in seconds) the reconcile engine runs a
+	// full pass for self-healing and drift correction. 0 disables the ticker.
+	// Only used when Engine is "reconcile".
+	ReconcileInterval int `yaml:"reconcile_interval" validate:"min=0"`
 }
 
 // Load various default values for the configurations of Beacons
 func defaults() Config {
 	return Config{
 		Sync: SyncConfig{
-			PollInterval:  300,
-			DebounceDelay: 500,
-			RetryInterval: 30,
-			DryRun:        false,
-			StrictEnv:     true,
-			UseEvents:     true,
+			PollInterval:      300,
+			DebounceDelay:     500,
+			RetryInterval:     30,
+			DryRun:            false,
+			StrictEnv:         true,
+			UseEvents:         true,
+			Engine:            "syncer",
+			ReconcileInterval: 300,
 		},
 		Store: StoreConfig{
 			Type: "memory",

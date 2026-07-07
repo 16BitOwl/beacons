@@ -1,6 +1,7 @@
 package registry_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -161,6 +162,72 @@ func TestFileStore_ListBySourceName(t *testing.T) {
 	}
 	if got[0].ID != "web" {
 		t.Errorf("ID = %q, want web", got[0].ID)
+	}
+}
+
+func TestFileStore_Batch_DefersFlushUntilDone(t *testing.T) {
+	path := tempStorePath(t)
+	s, err := registry.NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	var sawEmptyMidBatch bool
+	err = s.Batch(func() error {
+		if err := s.Upsert(newRecord("src1", "web", "cf")); err != nil {
+			return err
+		}
+		if err := s.Upsert(newRecord("src2", "api", "cf")); err != nil {
+			return err
+		}
+		data, readErr := os.ReadFile(path)
+		sawEmptyMidBatch = os.IsNotExist(readErr) || len(data) == 0
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Batch: %v", err)
+	}
+	if !sawEmptyMidBatch {
+		t.Error("expected no disk flush while Batch is in progress")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile after Batch: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("expected exactly one flush to disk once Batch completes")
+	}
+
+	records, _ := s.List()
+	if len(records) != 2 {
+		t.Fatalf("expected 2 records after Batch, got %d", len(records))
+	}
+}
+
+func TestFileStore_Batch_FlushesWhatWasWrittenBeforeFnError(t *testing.T) {
+	path := tempStorePath(t)
+	s, err := registry.NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	wantErr := errors.New("boom")
+	err = s.Batch(func() error {
+		_ = s.Upsert(newRecord("src1", "web", "cf"))
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Batch error = %v, want %v", err, wantErr)
+	}
+
+	s2, err := registry.NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore reload: %v", err)
+	}
+	records, _ := s2.List()
+	if len(records) != 1 {
+		t.Errorf("expected the pre-error write to still be flushed, got %d records", len(records))
 	}
 }
 
