@@ -154,6 +154,21 @@ func TestDiff_EmptyInputs(t *testing.T) {
 	}
 }
 
+func TestDiff_FailedRecordRetriesEvenWhenFieldsMatch(t *testing.T) {
+	// A create/update that never reached the upstream still gets an optimistic
+	// store write (Status=failed) with applied fields equal to desired. That
+	// must not settle into noop, or the record is never retried again.
+	want := rec("docker", "web", "cloudflare")
+	have := rec("docker", "web", "cloudflare", func(r *model.Record) {
+		r.Status = model.RecordStatusFailed
+	})
+
+	got := kindByKey(t, diff([]model.Record{want}, []model.Record{have}, map[string]bool{"docker": true}))
+	if got[model.RecordKey(want)] != OpUpdate {
+		t.Errorf("failed recorded status: got %v, want update", got[model.RecordKey(want)])
+	}
+}
+
 func TestDiff_CachedLastGoodProducesNoop(t *testing.T) {
 	// A source that failed this pass still contributes its last-good snapshot to
 	// desired (the reconciler retains it). Because it equals recorded, the pass

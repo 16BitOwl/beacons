@@ -31,6 +31,8 @@ func diff(desired, recorded []model.Record, snapshotted map[string]bool) Plan {
 		switch {
 		case !ok:
 			add(Op{Kind: OpCreate, Record: want})
+		case have.Status == model.RecordStatusFailed:
+			add(Op{Kind: OpUpdate, Record: want})
 		case appliedEqual(want, have):
 			add(Op{Kind: OpNoop, Record: want})
 		default:
@@ -54,9 +56,10 @@ func diff(desired, recorded []model.Record, snapshotted map[string]bool) Plan {
 }
 
 // appliedEqual reports whether the applied-relevant fields of two records match.
-// Sync-status fields (Status, SyncedAt, SyncError, Failures) are ignored. Name is
-// compared because it is a mutable applied field: a changed record name must
-// propagate to the upstream.
+// SyncedAt, SyncError, and Failures are ignored; Status is checked separately by
+// the caller, since a failed record must retry even when these fields match.
+// Name is compared because it is a mutable applied field: a changed record name
+// must propagate to the upstream.
 func appliedEqual(a, b model.Record) bool {
 	return a.Type == b.Type &&
 		a.Name == b.Name &&
