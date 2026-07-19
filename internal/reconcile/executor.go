@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -146,6 +147,22 @@ func (e *Executor) applyUpstream(ctx context.Context, u upstream.Upstream, ops [
 		go func(i int, op Op) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			// A panic in one adapter's Upsert/Delete must not crash the process
+			// and take every other in-flight op down with it. Convert it to a
+			// failed result so the record is gated and retried like any error.
+			defer func() {
+				if p := recover(); p != nil {
+					r := op.Record
+					r.Failures++
+					r.Status = model.RecordStatusFailed
+					r.SyncError = fmt.Sprintf("panic: %v", p)
+					e.logger.Error("reconcile: recovered panic applying op",
+						"upstream", r.Upstream,
+						"record", r.ID,
+						"panic", p)
+					results[i] = applyResult{record: r, err: fmt.Errorf("panic applying op: %v", p)}
+				}
+			}()
 			prior := recordedByKey[model.RecordKey(op.Record)]
 			results[i] = e.do(ctx, u, op, prior)
 		}(i, op)
@@ -169,6 +186,11 @@ func (e *Executor) do(ctx context.Context, u upstream.Upstream, op Op, prior mod
 			"value", r.Value)
 		err := e.upsert(ctx, u, r)
 		if err != nil {
+			if ctx.Err() != nil {
+				// Shutdown canceled this op mid-flight; not a real upstream
+				// failure. Skip so it isn't counted or backoff-gated.
+				return applyResult{skip: true}
+			}
 			r.Failures++
 			r.Status = model.RecordStatusFailed
 			r.SyncError = err.Error()
@@ -194,6 +216,9 @@ func (e *Executor) do(ctx context.Context, u upstream.Upstream, op Op, prior mod
 			"name", r.Name)
 		err := e.delete(ctx, u, r)
 		if err != nil {
+			if ctx.Err() != nil {
+				return applyResult{skip: true}
+			}
 			r.Failures++
 			r.Status = model.RecordStatusPendingDelete
 			r.SyncError = err.Error()

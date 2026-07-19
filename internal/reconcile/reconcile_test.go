@@ -72,6 +72,62 @@ func TestReconcile_FailedSnapshotKeepsRecords(t *testing.T) {
 	}
 }
 
+func TestReconcile_DeletesOrphansOfRemovedSource(t *testing.T) {
+	store := registry.NewMemoryStore()
+	up := &fakeUpstream{name: "pihole"}
+
+	// A record left behind by a source that is no longer configured.
+	orphan := rec("old-yaml", "gone", "pihole")
+	_ = store.Upsert(orphan)
+
+	// Only "yaml" is configured now; "old-yaml" was removed from config.
+	src := &fakeSource{name: "yaml", snap: []model.Record{rec("yaml", "web", "pihole")}}
+	r := newTestReconciler(store, []source.Snapshotter{src}, map[string]upstream.Upstream{"pihole": up})
+
+	r.reconcile(context.Background())
+
+	got, _ := store.List()
+	if len(got) != 1 || got[0].SourceName != "yaml" {
+		t.Fatalf("orphan of removed source should be deleted, got %+v", got)
+	}
+	if len(up.deletes) != 1 || up.deletes[0].ID != "gone" {
+		t.Errorf("upstream should have deleted the orphan, got %+v", up.deletes)
+	}
+}
+
+func TestReconcile_StoreReadFailureBacksOff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	// The store cancels the pass's context as a side effect of the failing read,
+	// so the backoff select returns immediately instead of sleeping.
+	store := &listErrStore{Store: registry.NewMemoryStore(), err: errors.New("disk gone"), onList: cancel}
+	src := &fakeSource{name: "yaml"}
+	r := newTestReconciler(store, []source.Snapshotter{src}, map[string]upstream.Upstream{})
+
+	if r.listFailures != 0 {
+		t.Fatalf("precondition: listFailures = %d, want 0", r.listFailures)
+	}
+	r.reconcile(ctx)
+
+	if r.listFailures != 1 {
+		t.Errorf("store read failure should increment backoff counter, got %d", r.listFailures)
+	}
+}
+
+// listErrStore fails List() with a fixed error, invoking onList first; other
+// calls delegate to the embedded Store.
+type listErrStore struct {
+	registry.Store
+	err    error
+	onList func()
+}
+
+func (s *listErrStore) List() ([]model.Record, error) {
+	if s.onList != nil {
+		s.onList()
+	}
+	return nil, s.err
+}
+
 func TestReconcile_RunShutsDownOnCancel(t *testing.T) {
 	store := registry.NewMemoryStore()
 	src := &blockingSource{name: "yaml"}

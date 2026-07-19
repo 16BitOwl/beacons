@@ -40,6 +40,14 @@ func (f *fakeUpstream) Delete(_ context.Context, r model.Record) error {
 	return f.deleteErr
 }
 
+// panicUpstream panics on every operation, exercising the executor's per-op
+// panic recovery.
+type panicUpstream struct{ name string }
+
+func (p *panicUpstream) Name() string                               { return p.name }
+func (p *panicUpstream) Upsert(context.Context, model.Record) error { panic("adapter boom") }
+func (p *panicUpstream) Delete(context.Context, model.Record) error { panic("adapter boom") }
+
 // singleOpPlan builds a plan with one op on the record's own upstream.
 func singleOpPlan(kind OpKind, r model.Record) Plan {
 	return Plan{Ops: map[string][]Op{r.Upstream: {{Kind: kind, Record: r}}}}
@@ -204,6 +212,40 @@ func TestExecutor_UnknownUpstream(t *testing.T) {
 	e.Apply(context.Background(), singleOpPlan(OpCreate, create), nil)
 	if got, _ := store.List(); len(got) != 0 {
 		t.Errorf("unknown-upstream create should be skipped, got %d", len(got))
+	}
+}
+
+func TestExecutor_RecoversUpstreamPanic(t *testing.T) {
+	store := registry.NewMemoryStore()
+	up := &panicUpstream{name: "cloudflare"}
+	clock := time.Unix(1000, 0)
+	e := newTestExecutor(store, map[string]upstream.Upstream{"cloudflare": up},
+		func() time.Time { return clock }, func(int) time.Duration { return time.Hour })
+
+	r := rec("docker", "web", "cloudflare")
+	// A panicking adapter must not crash the pass; it's recorded as a failure.
+	e.Apply(context.Background(), singleOpPlan(OpCreate, r), nil)
+
+	got, _ := store.List()
+	if len(got) != 1 || got[0].Status != model.RecordStatusFailed || got[0].Failures != 1 {
+		t.Fatalf("recovered panic should mark a failed record, got %+v", got)
+	}
+}
+
+func TestExecutor_CanceledContextNotCountedAsFailure(t *testing.T) {
+	store := registry.NewMemoryStore()
+	up := &fakeUpstream{name: "cloudflare", upsertErr: context.Canceled}
+	e := newTestExecutor(store, map[string]upstream.Upstream{"cloudflare": up}, nil, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	r := rec("docker", "web", "cloudflare")
+	// Shutdown canceled the op mid-flight: it must not persist a failure or gate.
+	e.Apply(ctx, singleOpPlan(OpCreate, r), nil)
+
+	if got, _ := store.List(); len(got) != 0 {
+		t.Fatalf("canceled op must not write store, got %+v", got)
 	}
 }
 
