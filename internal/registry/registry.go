@@ -26,7 +26,6 @@ type Store interface {
 	List() ([]model.Record, error)
 
 	// ListBySourceName returns all records produced by the named source adapter.
-	// Used by the syncer to find orphaned records during an EventSync.
 	ListBySourceName(sourceName string) ([]model.Record, error)
 }
 

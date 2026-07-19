@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/16bitowl/beacons/internal/model"
-	"github.com/16bitowl/beacons/pkg/source"
 )
 
 // writeYAML writes content to a temp file and returns its path.
@@ -449,6 +448,33 @@ func TestGlobDirs_NoMatchReturnsEmpty(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Snapshot: empty-match disambiguation
+// ---------------------------------------------------------------------------
+
+func TestSnapshot_EmptyDirIsLegitEmpty(t *testing.T) {
+	// Present directory, no matching files: a legitimate "nothing desired".
+	s := New(Options{Name: "src", Glob: filepath.Join(t.TempDir(), "*.yaml")})
+	recs, err := s.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot: unexpected error %v", err)
+	}
+	if len(recs) != 0 {
+		t.Errorf("expected 0 records, got %d", len(recs))
+	}
+}
+
+func TestSnapshot_MissingDirIsError(t *testing.T) {
+	// The base directory does not exist (vanished mount / unmounted volume):
+	// must be a read failure so the caller keeps the last good state, not an
+	// empty set that would delete every record the source owns.
+	glob := filepath.Join(t.TempDir(), "nonexistent", "*.yaml")
+	s := New(Options{Name: "src", Glob: glob})
+	if _, err := s.Snapshot(context.Background()); err == nil {
+		t.Fatal("expected error when base dir is missing, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // staticGlobDir / hasMeta
 // ---------------------------------------------------------------------------
 
@@ -492,39 +518,18 @@ func TestHasMeta(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Run: watcher fallback when nothing matches at startup
+// Notify: watcher fallback when nothing matches at startup
 // ---------------------------------------------------------------------------
 
-func TestRun_WatchesForNewFilesWhenNoneMatchAtStartup(t *testing.T) {
+func TestNotify_WatchesForNewFilesWhenNoneMatchAtStartup(t *testing.T) {
 	dir := t.TempDir()
 	glob := filepath.Join(dir, "*.yaml")
 	s := New(Options{Name: "src", Glob: glob})
 
-	ch := make(chan source.Event, 10)
+	ch := make(chan struct{}, 10)
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- s.Run(ctx, ch) }()
-	defer func() {
-		cancel()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Errorf("Run: %v", err)
-			}
-		case <-time.After(2 * time.Second):
-			t.Error("Run did not exit after context cancel")
-		}
-	}()
-
-	// Initial sync: no files match yet.
-	select {
-	case ev := <-ch:
-		if len(ev.Records) != 0 {
-			t.Fatalf("initial sync: got %d records, want 0", len(ev.Records))
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for initial sync")
-	}
+	defer cancel()
+	go s.Notify(ctx, ch)
 
 	content := `
 records:
@@ -537,7 +542,7 @@ records:
 	path := filepath.Join(dir, "new.yaml")
 
 	// Write repeatedly until the watcher (added despite the empty initial
-	// match set) picks up the new file; guards against a race with watcher.Add.
+	// match set) signals the new file; guards against a race with watcher.Add.
 	// Each attempt waits past the reload debounce so a picked-up write can fire.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -545,8 +550,12 @@ records:
 			t.Fatalf("WriteFile: %v", err)
 		}
 		select {
-		case ev := <-ch:
-			if len(ev.Records) == 1 {
+		case <-ch:
+			recs, err := s.Snapshot(ctx)
+			if err != nil {
+				t.Fatalf("Snapshot: %v", err)
+			}
+			if len(recs) == 1 {
 				return
 			}
 		case <-time.After(reloadDebounce + 200*time.Millisecond):

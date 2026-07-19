@@ -13,7 +13,6 @@ import (
 	"github.com/16bitowl/beacons/internal/envutil"
 	"github.com/16bitowl/beacons/internal/model"
 	"github.com/16bitowl/beacons/internal/validate"
-	"github.com/16bitowl/beacons/pkg/source"
 	"github.com/fsnotify/fsnotify"
 	"github.com/goccy/go-yaml"
 )
@@ -52,107 +51,6 @@ func New(opts Options) *Source {
 
 func (s *Source) Name() string { return s.name }
 
-func (s *Source) Run(ctx context.Context, ch chan<- source.Event) error {
-	slog.Info("yaml source starting",
-		"source", s.name,
-		"glob", s.glob)
-
-	s.loadAll(ch)
-
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := watcher.Close(); err != nil {
-			slog.Debug("yaml watcher close failed",
-				"source", s.name,
-				"err", err)
-		}
-	}()
-
-	// Watch the directories that match the glob pattern. If nothing matches
-	// yet, fall back to the glob's static prefix so new files are still seen.
-	dirs, err := globDirs(s.glob)
-	if err != nil {
-		slog.Error("yaml glob dirs failed",
-			"source", s.name,
-			"glob", s.glob,
-			"err", err)
-	}
-	if len(dirs) == 0 {
-		dirs = []string{staticGlobDir(s.glob)}
-	}
-	for _, d := range dirs {
-		slog.Debug("yaml source watching directory",
-			"source", s.name,
-			"dir", d)
-		if err := watcher.Add(d); err != nil {
-			slog.Error("yaml watcher add failed",
-				"source", s.name,
-				"dir", d,
-				"err", err)
-		}
-	}
-
-	// debounce coalesces rapid events; debounceC fires once they settle.
-	var debounce *time.Timer
-	var debounceC <-chan time.Time
-	for {
-		select {
-		case <-ctx.Done():
-			if debounce != nil {
-				debounce.Stop()
-			}
-			return nil
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return nil
-			}
-			matched, _ := filepath.Match(s.glob, event.Name)
-			if !matched {
-				continue
-			}
-			slog.Debug("yaml file changed, scheduling reload",
-				"source", s.name,
-				"file", event.Name)
-			if debounce == nil {
-				debounce = time.NewTimer(reloadDebounce)
-				debounceC = debounce.C
-			} else {
-				debounce.Reset(reloadDebounce)
-			}
-		case <-debounceC:
-			slog.Info("yaml reloading after change",
-				"source", s.name)
-			s.loadAll(ch)
-		case err := <-watcher.Errors:
-			slog.Error("yaml watcher error",
-				"source", s.name,
-				"err", err)
-		}
-	}
-}
-
-// loadAll builds a snapshot and emits it as a single EventSync. On a read/parse
-// error it logs and returns without emitting, leaving the last good state in
-// place until a clean read. A clean read with no records emits an empty sync so
-// the syncer removes any previously stored records.
-func (s *Source) loadAll(ch chan<- source.Event) {
-	records, err := s.Snapshot(context.Background())
-	if err != nil {
-		slog.Error("yaml snapshot failed, skipping reload to preserve live records",
-			"source", s.name,
-			"err", err)
-		return
-	}
-	ch <- source.Event{
-		Type:       source.EventSync,
-		SourceName: s.name,
-		Records:    records,
-	}
-}
-
 // Snapshot reads every file matching the glob and returns all records found.
 //
 // A read failure (glob error or any file that fails to parse) must never be
@@ -160,6 +58,12 @@ func (s *Source) loadAll(ch chan<- source.Event) {
 // last good state. A clean read that matches no files returns a nil slice and a
 // nil error — a legitimate "nothing desired." ctx is unused today but part of
 // the Snapshotter contract.
+//
+// filepath.Glob returns zero matches for both a genuinely empty directory and a
+// vanished one (dropped bind mount, unmounted volume, perm blip). The latter
+// must not read as "delete everything," so a zero-match result is only trusted
+// when the glob's base directory is actually present; otherwise it is a read
+// failure and the last good state is kept.
 func (s *Source) Snapshot(_ context.Context) ([]model.Record, error) {
 	files, err := filepath.Glob(s.glob)
 	if err != nil {
@@ -167,6 +71,10 @@ func (s *Source) Snapshot(_ context.Context) ([]model.Record, error) {
 	}
 
 	if len(files) == 0 {
+		dir := staticGlobDir(s.glob)
+		if _, statErr := os.Stat(dir); statErr != nil {
+			return nil, fmt.Errorf("yaml source base dir %q unavailable: %w", dir, statErr)
+		}
 		slog.Warn("yaml source found no files matching glob",
 			"source", s.name,
 			"glob", s.glob)

@@ -94,7 +94,7 @@ func main() {
 	}
 
 	// Build sources
-	var sources []source.Source
+	var sources []source.Snapshotter
 	for name, scfg := range cfg.Sources {
 		s, err := buildSource(buildSourceOptions{
 			Name:             name,
@@ -129,19 +129,9 @@ func main() {
 
 	reconcileInterval := time.Duration(cfg.Sync.ReconcileInterval) * time.Second
 
-	snapshotters := make([]source.Snapshotter, 0, len(sources))
-	for _, s := range sources {
-		snap, ok := s.(source.Snapshotter)
-		if !ok {
-			slog.Error("source does not support the reconciler",
-				"name", s.Name())
-			os.Exit(1)
-		}
-		snapshotters = append(snapshotters, snap)
-	}
 	r := reconcile.New(reconcile.Options{
 		Store:          store,
-		Sources:        snapshotters,
+		Sources:        sources,
 		Upstreams:      upstreams,
 		Interval:       reconcileInterval,
 		DebounceDelay:  debounceDelay,
@@ -318,7 +308,7 @@ type buildSourceOptions struct {
 	StrictValidation bool
 }
 
-func buildSource(opts buildSourceOptions) (source.Source, error) {
+func buildSource(opts buildSourceOptions) (source.Snapshotter, error) {
 	switch opts.Config.Type {
 	case "docker":
 		return sourcedocker.New(sourcedocker.Options{
