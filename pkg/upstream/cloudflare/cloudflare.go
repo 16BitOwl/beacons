@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/16bitowl/beacons/internal/model"
 	"github.com/16bitowl/beacons/pkg/upstream/transport"
@@ -41,15 +40,17 @@ type Upstream struct {
 }
 
 func New(ctx context.Context, opts Options) (*Upstream, error) {
-	// Use a plain one-shot client for the startup zone validation.
+	// Startup zone validation uses the same resilient chain as the runtime
+	// client (retry + attempt timeout + circuit breaker), so a transient blip
+	// at boot doesn't fail init outright and disable the upstream until restart.
 	initClient := &cfClient{
-		http: &http.Client{
-			Timeout: 15 * time.Second,
-			Transport: transport.Chain(nil,
-				transport.Bearer(opts.APIToken),
-				transport.DebugLog(opts.Debug),
-			),
-		},
+		http: transport.NewClient(transport.ClientOptions{
+			Name:            opts.Name,
+			Retry:           opts.RetryOptions,
+			MaxAuthFailures: opts.MaxAuthFailures,
+			Auth:            transport.Bearer(opts.APIToken),
+			Debug:           opts.Debug,
+		}),
 		zoneID:  opts.ZoneID,
 		baseURL: apiBase,
 	}
@@ -331,6 +332,12 @@ func (c *cfClient) doRaw(ctx context.Context, method, path string, body any) (*a
 
 	var env apiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		// A non-JSON body (proxy/WAF/outage error page) would otherwise surface
+		// only as an opaque decode error. Include the HTTP status so the real
+		// failure is visible; on a 2xx a decode failure is a genuine parse error.
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("cloudflare: HTTP %d with unparseable body: %w", resp.StatusCode, err)
+		}
 		return nil, fmt.Errorf("cloudflare: decode response: %w", err)
 	}
 	if !env.Success {

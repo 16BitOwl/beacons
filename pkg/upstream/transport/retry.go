@@ -145,7 +145,7 @@ func isRetryable(code int) bool {
 func calcDelay(attempt int, resp *http.Response, opts RetryOptions) time.Duration {
 	if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
 		if ra := resp.Header.Get("Retry-After"); ra != "" {
-			// Clamp to MaxDelay: a hostile/huge Retry-After must not stall the syncer.
+			// Clamp to MaxDelay: a hostile/huge Retry-After must not stall the reconciler.
 			if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
 				if d := time.Duration(secs) * time.Second; d < opts.MaxDelay {
 					return d

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -76,6 +77,9 @@ func New(opts Options) *Upstream {
 		password: opts.Password,
 		// authClient acquires sessions: it retries transient failures but carries
 		// no session middleware (there is no token yet) and no circuit breaker.
+		// A breaker here is unnecessary: authenticate wraps rejected credentials
+		// in ErrAuthFailed, which propagates through SessionAuth into the runtime
+		// client's breaker, so repeated auth failures still disable the upstream.
 		// The timeout is per attempt, matching the runtime client.
 		authClient: &http.Client{
 			Transport: transport.Chain(nil,
@@ -103,6 +107,16 @@ func New(opts Options) *Upstream {
 }
 
 func (u *Upstream) Name() string { return u.name }
+
+// drainClose discards any remaining body and closes it so the underlying
+// connection can be reused by keep-alive. Safe with a nil response.
+func drainClose(resp *http.Response) {
+	if resp == nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+}
 
 func (u *Upstream) Upsert(ctx context.Context, r model.Record) error {
 	switch r.Type {
@@ -239,8 +253,7 @@ func (u *Upstream) getCNAMERecords(ctx context.Context) ([]string, error) {
 // string. nameOf extracts the owning name from an entry. Removing every entry
 // that shares the record's name is what stops a value/TTL change leaving a
 // stale duplicate behind. This assumes one entry per name (PiHole is not used
-// for multi-value round-robin); the reconciler will key on the full record
-// instead once it lands.
+// for multi-value round-robin).
 //
 // changed reports whether the result differs from entries, so a no-op can skip
 // the PATCH.
@@ -305,7 +318,7 @@ func (u *Upstream) authenticate(ctx context.Context) (transport.Session, error) 
 	if err != nil {
 		return transport.Session{}, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer drainClose(resp)
 
 	var ar authResponse
 	if err := json.NewDecoder(resp.Body).Decode(&ar); err != nil {
@@ -341,7 +354,7 @@ func (u *Upstream) get(ctx context.Context, path string, dst any) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer drainClose(resp)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("pihole: GET %s returned %d", path, resp.StatusCode)
 	}
@@ -365,7 +378,7 @@ func (u *Upstream) patch(ctx context.Context, payload any) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer drainClose(resp)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		var errBody map[string]any
 		_ = json.NewDecoder(resp.Body).Decode(&errBody)

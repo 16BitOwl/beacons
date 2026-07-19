@@ -44,6 +44,10 @@ type CircuitBreakerOptions struct {
 //
 // The failure counter resets to zero on any non-401/403 response, so transient
 // failures don't accumulate against the threshold.
+//
+// Scope: this is an authentication killswitch, not general outage protection.
+// It deliberately never trips on 5xx or network errors — those are transient and
+// handled by Retry; tripping on them would disable an upstream during a blip.
 func CircuitBreaker(opts CircuitBreakerOptions) Middleware {
 	maxFails := int32(opts.MaxAuthFailures)
 	if maxFails <= 0 {
