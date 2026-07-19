@@ -105,6 +105,12 @@ type UpstreamConfig struct {
 
 	// HTTP contains HTTP client tuning shared across upstream types.
 	HTTP UpstreamHTTPConfig `yaml:"http"`
+
+	// VerifyInterval is how often (in seconds) reconcile reads this upstream's
+	// actual state back to detect drift (hand-edited/deleted records). 0
+	// disables verification for this upstream (default: off). Respect provider
+	// rate limits when setting this — e.g. Cloudflare, not a self-hosted PiHole.
+	VerifyInterval int `yaml:"verify_interval" validate:"min=0"`
 }
 
 // SourceConfig holds the configuration for a named source adapter instance.

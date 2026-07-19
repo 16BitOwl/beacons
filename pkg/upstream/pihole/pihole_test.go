@@ -128,6 +128,137 @@ func TestCNAMEAlias(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// splitHostEntry / hostRecordType / splitCNAMEEntry
+// ---------------------------------------------------------------------------
+
+func TestSplitHostEntry(t *testing.T) {
+	if ip, name, ok := splitHostEntry("1.2.3.4 web"); !ok || ip != "1.2.3.4" || name != "web" {
+		t.Errorf("got (%q, %q, %v), want (1.2.3.4, web, true)", ip, name, ok)
+	}
+	if ip, name, ok := splitHostEntry("::1 ipv6.host"); !ok || ip != "::1" || name != "ipv6.host" {
+		t.Errorf("got (%q, %q, %v), want (::1, ipv6.host, true)", ip, name, ok)
+	}
+	if _, _, ok := splitHostEntry("1.2.3.4 a b"); ok {
+		t.Error("multi-host line should return ok=false")
+	}
+	if _, _, ok := splitHostEntry("malformed"); ok {
+		t.Error("entry with no space should return ok=false")
+	}
+}
+
+func TestHostRecordType(t *testing.T) {
+	if got := hostRecordType("1.2.3.4"); got != model.RecordTypeA {
+		t.Errorf("got %v, want A", got)
+	}
+	if got := hostRecordType("::1"); got != model.RecordTypeAAAA {
+		t.Errorf("got %v, want AAAA", got)
+	}
+}
+
+func TestSplitCNAMEEntry(t *testing.T) {
+	alias, target, ttl := splitCNAMEEntry("web,target")
+	if alias != "web" || target != "target" || ttl != 0 {
+		t.Errorf("got (%q, %q, %d), want (web, target, 0)", alias, target, ttl)
+	}
+	alias, target, ttl = splitCNAMEEntry("web,target,300")
+	if alias != "web" || target != "target" || ttl != 300 {
+		t.Errorf("got (%q, %q, %d), want (web, target, 300)", alias, target, ttl)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DriftEqual (upstream.DriftComparer)
+// ---------------------------------------------------------------------------
+
+func TestDriftEqual_TTLIgnoredForHosts(t *testing.T) {
+	u := &Upstream{name: "test"}
+	want := model.Record{Type: model.RecordTypeA, Name: "web", Value: "1.2.3.4", BaseRecord: model.BaseRecord{TTL: 300}}
+	got := want
+	got.TTL = 0 // dns.hosts carries no TTL; List() always reports 0
+
+	if !u.DriftEqual(want, got) {
+		t.Error("DriftEqual = false, want true: TTL must be ignored for A/AAAA")
+	}
+}
+
+func TestDriftEqual_TTLComparedForCNAME(t *testing.T) {
+	u := &Upstream{name: "test"}
+	want := model.Record{Type: model.RecordTypeCNAME, Name: "alias", Value: "target", BaseRecord: model.BaseRecord{TTL: 300}}
+	got := want
+	got.TTL = 60
+
+	if u.DriftEqual(want, got) {
+		t.Error("DriftEqual = true, want false: TTL is representable and must be compared for CNAME")
+	}
+}
+
+func TestDriftEqual_CommentNeverCompared(t *testing.T) {
+	u := &Upstream{name: "test"}
+	want := model.Record{Type: model.RecordTypeA, Name: "web", Value: "1.2.3.4", BaseRecord: model.BaseRecord{Comment: "managed by beacons"}}
+	got := want
+	got.Comment = "" // PiHole cannot represent comments at all
+
+	if !u.DriftEqual(want, got) {
+		t.Error("DriftEqual = false, want true: PiHole cannot represent comments, must never compare them")
+	}
+}
+
+func TestDriftEqual_ValueDifference_IsDrift(t *testing.T) {
+	u := &Upstream{name: "test"}
+	want := model.Record{Type: model.RecordTypeA, Name: "web", Value: "1.2.3.4"}
+	got := model.Record{Type: model.RecordTypeA, Name: "web", Value: "9.9.9.9"}
+
+	if u.DriftEqual(want, got) {
+		t.Error("DriftEqual = true, want false: value differs")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// List (upstream verification)
+// ---------------------------------------------------------------------------
+
+func TestList_HostsAndCNAMEs_ParsedIntoRecords(t *testing.T) {
+	srv := newRetryServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/config/dns/hosts":
+			_, _ = fmt.Fprint(w, `{"config":{"dns":{"hosts":["1.2.3.4 web","::1 ipv6","9.9.9.9 shared host"]}}}`)
+		case "/api/config/dns/cnameRecords":
+			_, _ = fmt.Fprint(w, `{"config":{"dns":{"cnameRecords":["alias,target.example.com,300"]}}}`)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	u := New(Options{Name: "test", BaseURL: srv.URL, Password: "pw"})
+	records, err := u.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("records = %d, want 3 (2 hosts + 1 cname, multi-host line skipped): %+v", len(records), records)
+	}
+
+	byName := map[string]model.Record{}
+	for _, r := range records {
+		byName[r.Name] = r
+	}
+	if r, ok := byName["web"]; !ok || r.Type != model.RecordTypeA || r.Value != "1.2.3.4" {
+		t.Errorf("web = %+v", r)
+	}
+	if r, ok := byName["ipv6"]; !ok || r.Type != model.RecordTypeAAAA || r.Value != "::1" {
+		t.Errorf("ipv6 = %+v", r)
+	}
+	if r, ok := byName["alias"]; !ok || r.Type != model.RecordTypeCNAME || r.Value != "target.example.com" || r.TTL != 300 {
+		t.Errorf("alias = %+v", r)
+	}
+	if _, ok := byName["host"]; ok {
+		t.Error("multi-host entry must not be attributed to a single record")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // 401 retry — get and patch
 // ---------------------------------------------------------------------------
 

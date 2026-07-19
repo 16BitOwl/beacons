@@ -89,6 +89,18 @@ func (u *Upstream) fqdn(name string) string {
 	return name + suffix
 }
 
+// shortName is the inverse of fqdn: it strips the zone suffix from a name
+// Cloudflare returns, back to the short form model.Record.Name carries. An
+// apex record's name already equals the zone name in both forms, so it passes
+// through unchanged, matching fqdn's own apex handling.
+func (u *Upstream) shortName(name string) string {
+	suffix := "." + u.zoneName
+	if name != u.zoneName && strings.HasSuffix(name, suffix) {
+		return strings.TrimSuffix(name, suffix)
+	}
+	return name
+}
+
 func (u *Upstream) Name() string { return u.name }
 
 func (u *Upstream) Upsert(ctx context.Context, r model.Record) error {
@@ -164,6 +176,34 @@ func (u *Upstream) Upsert(ctx context.Context, r model.Record) error {
 		return fmt.Errorf("cloudflare create record: %w", err)
 	}
 	return nil
+}
+
+// List returns every record in the zone, for upstream-verification drift
+// detection. Unlike Upsert/Delete's listDNSRecords, it applies no name/type
+// filter — reconcile matches the result against desired state itself.
+func (u *Upstream) List(ctx context.Context) ([]model.Record, error) {
+	records, err := u.client.listAllDNSRecords(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("cloudflare list records: %w", err)
+	}
+	out := make([]model.Record, 0, len(records))
+	for _, rec := range records {
+		r := model.Record{
+			Upstream: u.name,
+			Type:     model.RecordType(rec.Type),
+			Name:     u.shortName(rec.Name),
+			Value:    rec.Content,
+			BaseRecord: model.BaseRecord{
+				TTL:     rec.TTL,
+				Comment: rec.Comment,
+			},
+		}
+		if rec.Priority != nil {
+			r.Priority = int(*rec.Priority)
+		}
+		out = append(out, r)
+	}
+	return out, nil
 }
 
 func (u *Upstream) Delete(ctx context.Context, r model.Record) error {
@@ -371,15 +411,32 @@ func (c *cfClient) getZone(ctx context.Context) (*zone, error) {
 // page until the result set is exhausted.
 // content is optional; pass an empty string to omit the filter.
 func (c *cfClient) listDNSRecords(ctx context.Context, recordType, name, content string) ([]dnsRecord, error) {
+	params := url.Values{}
+	params.Set("type", recordType)
+	params.Set("name", name)
+	if content != "" {
+		params.Set("content", content)
+	}
+	return c.paginateDNSRecords(ctx, params)
+}
+
+// listAllDNSRecords lists every record in the zone, with no name/type filter.
+// Used only by List (upstream-verification); Upsert/Delete use the filtered
+// listDNSRecords instead.
+func (c *cfClient) listAllDNSRecords(ctx context.Context) ([]dnsRecord, error) {
+	return c.paginateDNSRecords(ctx, url.Values{})
+}
+
+// paginateDNSRecords fetches every page of the DNS records list endpoint under
+// filter, merging results until the result set is exhausted.
+func (c *cfClient) paginateDNSRecords(ctx context.Context, filter url.Values) ([]dnsRecord, error) {
 	const perPage = 100
 
 	var all []dnsRecord
 	for page := 1; ; page++ {
 		params := url.Values{}
-		params.Set("type", recordType)
-		params.Set("name", name)
-		if content != "" {
-			params.Set("content", content)
+		for k, v := range filter {
+			params[k] = v
 		}
 		params.Set("page", strconv.Itoa(page))
 		params.Set("per_page", strconv.Itoa(perPage))

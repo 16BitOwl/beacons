@@ -17,6 +17,10 @@ type Options struct {
 	Store     registry.Store
 	Sources   []source.Snapshotter
 	Upstreams map[string]upstream.Upstream
+	// UpstreamVerifyInterval is the minimum time between upstream List calls
+	// per upstream name, for three-way drift detection. A zero or absent entry
+	// disables verification for that upstream (default: off).
+	UpstreamVerifyInterval map[string]time.Duration
 	// Interval triggers a periodic full reconcile for self-healing and drift
 	// correction; 0 disables the ticker.
 	Interval time.Duration
@@ -35,13 +39,16 @@ type Options struct {
 // diff it against recorded state, and apply the minimal set of upstream changes.
 // A single goroutine owns recorded state; all concurrency lives in the executor.
 type Reconciler struct {
-	store     registry.Store
-	sources   []source.Snapshotter
-	collector *Collector
-	executor  *Executor
-	interval  time.Duration
-	debounce  time.Duration
-	logger    *slog.Logger
+	store             registry.Store
+	sources           []source.Snapshotter
+	collector         *Collector
+	upstreamCollector *UpstreamCollector
+	driftComparers    map[string]func(want, got model.Record) bool
+	executor          *Executor
+	interval          time.Duration
+	debounce          time.Duration
+	metrics           *metrics.Metrics
+	logger            *slog.Logger
 
 	listFailures int // consecutive store.List failures, for read backoff
 }
@@ -59,6 +66,13 @@ func New(opts Options) *Reconciler {
 			Sources: opts.Sources,
 			Logger:  logger,
 		}),
+		upstreamCollector: NewUpstreamCollector(UpstreamCollectorOptions{
+			Upstreams:      opts.Upstreams,
+			VerifyInterval: opts.UpstreamVerifyInterval,
+			Metrics:        opts.Metrics,
+			Logger:         logger,
+		}),
+		driftComparers: buildDriftComparers(opts.Upstreams),
 		executor: NewExecutor(ExecutorOptions{
 			Store:          opts.Store,
 			Upstreams:      opts.Upstreams,
@@ -68,8 +82,23 @@ func New(opts Options) *Reconciler {
 		}),
 		interval: opts.Interval,
 		debounce: opts.DebounceDelay,
+		metrics:  opts.Metrics,
 		logger:   logger,
 	}
+}
+
+// buildDriftComparers resolves each upstream's drift-equality function: its
+// own upstream.DriftComparer override if implemented, or nil to fall back to
+// appliedEqual (the same field set the two-way diff uses). Built once at
+// construction since the upstream set is fixed for the Reconciler's lifetime.
+func buildDriftComparers(upstreams map[string]upstream.Upstream) map[string]func(want, got model.Record) bool {
+	out := make(map[string]func(want, got model.Record) bool, len(upstreams))
+	for name, u := range upstreams {
+		if dc, ok := u.(upstream.DriftComparer); ok {
+			out[name] = dc.DriftEqual
+		}
+	}
+	return out
 }
 
 // Run starts every source's change notifier and reconciles until ctx is
@@ -173,15 +202,47 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	// records of configured sources that merely failed to snapshot this pass.
 	markOrphanSources(r.sources, recorded, snapshotted)
 
-	plan := diff(desired, recorded, snapshotted)
+	actual, fetched := r.upstreamCollector.Collect(ctx, time.Now())
+
+	plan := diff(desired, recorded, snapshotted, upstreamVerification{
+		Actual:  actual,
+		Fetched: fetched,
+		Compare: r.driftComparers,
+	})
 	s := plan.Summary()
 	r.logger.Info("reconcile pass computed",
 		"create", s[OpCreate],
 		"update", s[OpUpdate],
 		"delete", s[OpDelete],
 		"noop", s[OpNoop])
+	r.logDrift(plan)
 
 	r.executor.Apply(ctx, plan, recorded)
+}
+
+// logDrift logs and counts each drift-corrected op in plan separately from
+// ordinary desired-state changes, so operators can see how often upstream
+// verification actually fires — expected to be rare; a spike is itself a
+// signal (manual zone edits, or a provider incident).
+func (r *Reconciler) logDrift(plan Plan) {
+	for upstreamName, ops := range plan.Ops {
+		for _, op := range ops {
+			if op.DriftReason == "" {
+				continue
+			}
+			r.logger.Warn("reconcile: drift detected, correcting",
+				"upstream", upstreamName,
+				"record", op.Record.ID,
+				"reason", op.DriftReason)
+			r.logger.Debug("reconcile: drift detail",
+				"upstream", upstreamName,
+				"record", op.Record.ID,
+				"detail", op.DriftDetail)
+			if r.metrics != nil {
+				r.metrics.RecordDrift(upstreamName, op.DriftReason)
+			}
+		}
+	}
 }
 
 // markOrphanSources flags source names that appear in recorded state but are no
