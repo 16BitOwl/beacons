@@ -35,6 +35,7 @@ go.work.sum
 # Docker or runtime related
 docker-compose.dev.yaml
 data/
+.technitium/
 
 # Local config (use beacons.example.yaml as a starting point)
 beacons.yaml
@@ -47,4 +48,5 @@ notes/
 skills-lock.json
 .kiro
 .kilocode
-.tokensave/
+.tokensave
+.claude
