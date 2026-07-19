@@ -53,7 +53,7 @@ type HTTPConfig struct {
 	// in seconds (0 = infinite)
 	ReadTimeout int `yaml:"read_timeout" validate:"min=0"`
 
-	// IdleTimeout configure the HTTP server read timeout
+	// IdleTimeout configures the HTTP server idle (keep-alive) timeout
 	// in seconds (0 = infinite)
 	IdleTimeout int `yaml:"idle_timeout" validate:"min=0"`
 
@@ -61,8 +61,8 @@ type HTTPConfig struct {
 	// in seconds (0 = infinite)
 	WriteTimeout int `yaml:"write_timeout" validate:"min=0"`
 
-	// ShutdownTimeout configure the HTTP server read timeout
-	// in seconds, must be none zero
+	// ShutdownTimeout configures the HTTP server graceful-shutdown timeout
+	// in seconds; must be non-zero
 	ShutdownTimeout int `yaml:"shutdown_timeout" validate:"gt=0"`
 
 	// Auth configures authentication for protected endpoints (currently /state).

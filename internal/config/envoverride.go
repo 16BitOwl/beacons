@@ -66,6 +66,8 @@ func walkStruct(v reflect.Value, path string, env map[string]string, revealValue
 		case reflect.Map:
 			walkMap(fv, fieldPath, env, revealValues)
 		default:
+			// An empty env value is ignored, so a field cannot be overridden
+			// back to its zero value via env (e.g. BEACONS_..._TTL= won't set 0).
 			if val, ok := env[fieldPath]; ok && val != "" {
 				prev := fv.Interface()
 				setScalar(fv, val, fieldPath)
@@ -77,8 +79,12 @@ func walkStruct(v reflect.Value, path string, env map[string]string, revealValue
 
 // logEnvOverride records that a field was set or changed by an env var. Values
 // might be secrets, so they are only logged when revealValues is set; otherwise
-// just the key is logged.
+// just the key is logged. A no-op (value unchanged, e.g. a parse that silently
+// failed and left the field as-is) is not logged.
 func logEnvOverride(key string, prev, cur any, t reflect.Type, revealValues bool) {
+	if reflect.DeepEqual(prev, cur) {
+		return
+	}
 	switch {
 	case reflect.DeepEqual(prev, reflect.Zero(t).Interface()):
 		attrs := []any{"key", key}
@@ -178,7 +184,14 @@ func setScalar(fv reflect.Value, val, key string) {
 				"err", err)
 		}
 	case reflect.Bool:
-		fv.SetBool(val == "true" || val == "1")
+		if b, err := strconv.ParseBool(val); err == nil {
+			fv.SetBool(b)
+		} else {
+			slog.Warn("config env var has unparseable bool value, ignoring",
+				"key", key,
+				"value", val,
+				"err", err)
+		}
 	case reflect.Float32, reflect.Float64:
 		if n, err := strconv.ParseFloat(val, 64); err == nil {
 			fv.SetFloat(n)

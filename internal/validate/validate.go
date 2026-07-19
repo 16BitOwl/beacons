@@ -99,8 +99,13 @@ func walkStruct(rv reflect.Value, path string) ValidationErrors {
 		}
 	}
 
-	// Custom cross-field validation.
-	if val, ok := rv.Addr().Interface().(Validatable); ok {
+	// Custom cross-field validation. Struct() may be called with a non-pointer
+	// value (unaddressable), so guard Addr() and fall back to the value receiver.
+	if rv.CanAddr() {
+		if val, ok := rv.Addr().Interface().(Validatable); ok {
+			errs = append(errs, val.BeaconsValidate(path)...)
+		}
+	} else if val, ok := rv.Interface().(Validatable); ok {
 		errs = append(errs, val.BeaconsValidate(path)...)
 	}
 
