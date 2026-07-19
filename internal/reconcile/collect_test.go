@@ -123,7 +123,7 @@ func TestCollect_FeedsDiff_FailedSourceNoDelete(t *testing.T) {
 	src.snap, src.err = nil, errors.New("read failed")
 	desired, snapshotted := c.Collect(context.Background())
 
-	got := kindByKey(t, diff(desired, []model.Record{r}, snapshotted))
+	got := kindByKey(t, diff(desired, []model.Record{r}, snapshotted, upstreamVerification{}))
 	if got[model.RecordKey(r)] != OpNoop {
 		t.Errorf("failed source record: got %v, want noop", got[model.RecordKey(r)])
 	}

@@ -79,6 +79,7 @@ func main() {
 
 	// Build upstreams
 	upstreams := make(map[string]upstream.Upstream, len(cfg.Upstreams))
+	upstreamVerifyInterval := make(map[string]time.Duration, len(cfg.Upstreams))
 	for name, ucfg := range cfg.Upstreams {
 		u, err := buildUpstream(ctx, name, ucfg)
 		if err != nil {
@@ -92,6 +93,7 @@ func main() {
 			u = upstream.NewDryRun(u)
 		}
 		upstreams[name] = u
+		upstreamVerifyInterval[name] = time.Duration(ucfg.VerifyInterval) * time.Second
 	}
 
 	// Build sources
@@ -131,13 +133,14 @@ func main() {
 	reconcileInterval := time.Duration(cfg.Sync.ReconcileInterval) * time.Second
 
 	r := reconcile.New(reconcile.Options{
-		Store:          store,
-		Sources:        sources,
-		Upstreams:      upstreams,
-		Interval:       reconcileInterval,
-		DebounceDelay:  debounceDelay,
-		MaxConcurrency: 4,
-		Metrics:        m,
+		Store:                  store,
+		Sources:                sources,
+		Upstreams:              upstreams,
+		UpstreamVerifyInterval: upstreamVerifyInterval,
+		Interval:               reconcileInterval,
+		DebounceDelay:          debounceDelay,
+		MaxConcurrency:         4,
+		Metrics:                m,
 	})
 
 	slog.Info("beacons starting",

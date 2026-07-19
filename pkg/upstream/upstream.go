@@ -19,6 +19,33 @@ type Upstream interface {
 	Delete(ctx context.Context, r model.Record) error
 }
 
+// Lister is implemented by upstream adapters that can read back their current
+// record set. Reconcile uses it to detect drift between what the store
+// believes is synced and what the upstream actually holds. An upstream that
+// doesn't implement Lister is simply never verified — existing two-way
+// reconcile behavior for it is unchanged.
+type Lister interface {
+	// List returns every record the upstream currently holds. Returned records
+	// carry Type/Name/Value/Upstream (and TTL/Priority where modeled); SourceID
+	// and ID are left zero since the upstream has no concept of them — reconcile
+	// matches these against desired state by content, not by RecordKey.
+	List(ctx context.Context) ([]model.Record, error)
+}
+
+// DriftComparer lets an upstream adapter override which applied fields matter
+// for upstream-verification drift detection, for adapters that cannot
+// round-trip every field the two-way diff considers (e.g. PiHole cannot
+// represent comments at all, and its hosts entries carry no TTL on the wire).
+// An upstream that doesn't implement this is compared on every applied field
+// (Type/Name/Value/TTL/Priority/Comment) — the same set the two-way diff uses.
+type DriftComparer interface {
+	// DriftEqual reports whether got (a record from List) should be considered
+	// in sync with want (desired), for drift detection. Both records carry
+	// only the fields List() populates; RecordKey identity fields (ID,
+	// SourceID, Status, ...) are irrelevant here and must not be compared.
+	DriftEqual(want, got model.Record) bool
+}
+
 // Disabled is an upstream that failed to initialize. Every operation returns
 // the original init error so records are marked failed in the store rather than
 // silently dropped. The retry loop will keep attempting them; once the

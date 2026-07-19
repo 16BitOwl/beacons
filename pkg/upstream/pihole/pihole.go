@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -138,6 +139,59 @@ func (u *Upstream) Delete(ctx context.Context, r model.Record) error {
 	default:
 		return fmt.Errorf("pihole: unsupported record type %s", r.Type)
 	}
+}
+
+// DriftEqual implements upstream.DriftComparer. PiHole cannot represent
+// comments at all (Upsert ignores them, see patchHosts/patchCNAME), so Comment
+// is never compared. dns.hosts entries (A/AAAA) carry no TTL on the wire —
+// only dns.cnameRecords entries have one — so TTL is compared for CNAME only.
+func (u *Upstream) DriftEqual(want, got model.Record) bool {
+	if want.Type != got.Type || want.Name != got.Name || want.Value != got.Value {
+		return false
+	}
+	if got.Type == model.RecordTypeCNAME && want.TTL != got.TTL {
+		return false
+	}
+	return true
+}
+
+// List returns every A/AAAA (dns.hosts) and CNAME (dns.cnameRecords) entry, for
+// upstream-verification drift detection. Entries PiHole doesn't attribute to
+// beacons (multi-host lines) are skipped rather than guessed at.
+func (u *Upstream) List(ctx context.Context) ([]model.Record, error) {
+	hosts, err := u.getHosts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("pihole list hosts: %w", err)
+	}
+	cnames, err := u.getCNAMERecords(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("pihole list cname records: %w", err)
+	}
+
+	out := make([]model.Record, 0, len(hosts)+len(cnames))
+	for _, entry := range hosts {
+		ip, name, ok := splitHostEntry(entry)
+		if !ok {
+			continue
+		}
+		out = append(out, model.Record{
+			Upstream: u.name,
+			Type:     hostRecordType(ip),
+			Name:     name,
+			Value:    ip,
+		})
+	}
+	for _, entry := range cnames {
+		alias, target, ttl := splitCNAMEEntry(entry)
+		out = append(out, model.Record{
+			Upstream:   u.name,
+			Type:       model.RecordTypeCNAME,
+			Name:       alias,
+			Value:      target,
+			BaseRecord: model.BaseRecord{TTL: ttl},
+		})
+	}
+	return out, nil
 }
 
 // patchHosts adds or removes an entry from dns.hosts.
@@ -294,6 +348,43 @@ func cnameAlias(entry string) string {
 		return entry[:i]
 	}
 	return entry
+}
+
+// splitHostEntry parses a "IP hostname" hosts entry into its IP and hostname.
+// A multi-host line returns ok=false: beacons only ever writes single-host
+// entries, so a multi-host line is hand-managed and not attributable to one record.
+func splitHostEntry(entry string) (ip, name string, ok bool) {
+	i := strings.IndexByte(entry, ' ')
+	if i < 0 {
+		return "", "", false
+	}
+	ip = entry[:i]
+	rest := strings.TrimSpace(entry[i+1:])
+	if rest == "" || strings.ContainsAny(rest, " \t") {
+		return "", "", false
+	}
+	return ip, rest, true
+}
+
+// hostRecordType classifies a hosts-entry IP as A or AAAA.
+func hostRecordType(ip string) model.RecordType {
+	if strings.Contains(ip, ":") {
+		return model.RecordTypeAAAA
+	}
+	return model.RecordTypeA
+}
+
+// splitCNAMEEntry parses an "alias,target[,ttl]" cname entry.
+func splitCNAMEEntry(entry string) (alias, target string, ttl int) {
+	parts := strings.SplitN(entry, ",", 3)
+	alias = parts[0]
+	if len(parts) > 1 {
+		target = parts[1]
+	}
+	if len(parts) > 2 {
+		ttl, _ = strconv.Atoi(parts[2])
+	}
+	return alias, target, ttl
 }
 
 // authenticate acquires a PiHole session token. It is supplied to the

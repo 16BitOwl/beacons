@@ -31,12 +31,27 @@ func (k OpKind) String() string {
 	}
 }
 
+// Drift correction reasons: why upstream-verification disagreed with the
+// store's belief that a record was already synced.
+const (
+	DriftMissing = "missing" // no record on the upstream at all for this content
+	DriftChanged = "changed" // upstream holds a different value for this name+type
+)
+
 // Op is a single planned change for one record on one upstream. For create,
 // update, and noop the record is the desired record; for delete it is the
 // recorded record being removed.
 type Op struct {
 	Kind   OpKind
 	Record model.Record
+	// DriftReason is set (DriftMissing or DriftChanged) when this op was
+	// produced by upstream-verification disagreeing with the store, rather
+	// than by an ordinary desired-vs-recorded difference. Empty otherwise.
+	DriftReason string
+	// DriftDetail describes which applied fields differed from the upstream's
+	// actual state (or that no matching record was found), for debug logging.
+	// Only set alongside DriftReason.
+	DriftDetail string
 }
 
 // Plan is the set of ops for one reconcile pass, grouped by upstream name so the

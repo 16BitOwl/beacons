@@ -73,6 +73,10 @@ upstreams:
     type: cloudflare
     api_token: ${CF_API_TOKEN}
     zone_id: ${CF_ZONE_A_ID}
+    # verify_interval: 300 # seconds between upstream reads to detect drift
+                           # (hand-edited/deleted records); 0 or omit disables
+                           # verification. Respect provider rate limits —
+                           # Cloudflare-class APIs should stay in the minutes range.
     http:
       retry_max_attempts: 3
       retry_base_delay_ms: 500
@@ -93,6 +97,7 @@ upstreams:
     type: pihole
     url: ${PIHOLE_URL}
     password: ${PIHOLE_PASSWORD}
+    verify_interval: 60 # self-hosted, so a shorter interval is fine
 
   technitium-home:
     type: technitium

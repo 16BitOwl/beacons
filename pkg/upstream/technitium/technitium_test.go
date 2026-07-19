@@ -358,6 +358,97 @@ func TestDelete_CNAME_NoValueParamSent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// DriftEqual (upstream.DriftComparer)
+// ---------------------------------------------------------------------------
+
+func TestDriftEqual_CommentNeverCompared(t *testing.T) {
+	u := newTestUpstream("http://unused", "example.com")
+	want := rec(model.RecordTypeA, "web", "1.2.3.4", 300, 0)
+	want.Comment = "managed by beacons"
+	got := want
+	got.Comment = "" // records/get does not return comments; List() never populates it
+
+	if !u.DriftEqual(want, got) {
+		t.Error("DriftEqual = false, want true: comment is not round-tripped, must never compare it")
+	}
+}
+
+func TestDriftEqual_TTLCompared(t *testing.T) {
+	u := newTestUpstream("http://unused", "example.com")
+	want := rec(model.RecordTypeA, "web", "1.2.3.4", 300, 0)
+	got := want
+	got.TTL = 60
+
+	if u.DriftEqual(want, got) {
+		t.Error("DriftEqual = true, want false: TTL is read back accurately and must be compared")
+	}
+}
+
+func TestDriftEqual_PriorityCompared(t *testing.T) {
+	u := newTestUpstream("http://unused", "example.com")
+	want := rec(model.RecordTypeMX, "mail", "mx1.example.com", 300, 10)
+	got := want
+	got.Priority = 20
+
+	if u.DriftEqual(want, got) {
+		t.Error("DriftEqual = true, want false: priority differs")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// List (upstream verification)
+// ---------------------------------------------------------------------------
+
+func TestList_ListsWholeZone_SkipsUnsupportedTypes(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/records/get") {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			return
+		}
+		gotQuery = r.URL.Query()
+		_, _ = fmt.Fprint(w, tOK(map[string]any{
+			"records": []any{
+				map[string]any{"name": "web", "type": "A", "ttl": 300, "rData": map[string]any{"ipAddress": "1.2.3.4"}},
+				map[string]any{"name": "mail", "type": "MX", "ttl": 300, "rData": map[string]any{"exchange": "mx1.example.com", "preference": 10}},
+				map[string]any{"name": "_sip._tcp", "type": "SRV", "ttl": 300, "rData": map[string]any{}},
+			},
+		}))
+	}))
+	defer srv.Close()
+
+	u := newTestUpstream(srv.URL, "example.com")
+	records, err := u.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if gotQuery.Get("listZone") != "true" {
+		t.Errorf("listZone = %q, want true", gotQuery.Get("listZone"))
+	}
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want 2 (SRV skipped as unsupported)", len(records))
+	}
+	if records[0].Value != "1.2.3.4" {
+		t.Errorf("record[0].Value = %q, want 1.2.3.4", records[0].Value)
+	}
+	if records[1].Value != "mx1.example.com" || records[1].Priority != 10 {
+		t.Errorf("record[1] = %+v, want exchange mx1.example.com priority 10", records[1])
+	}
+}
+
+func TestList_APIError_ReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, tErr("internal error"))
+	}))
+	defer srv.Close()
+
+	u := newTestUpstream(srv.URL, "example.com")
+	if _, err := u.List(context.Background()); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // APIError
 // ---------------------------------------------------------------------------
 

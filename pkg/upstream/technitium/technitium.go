@@ -171,6 +171,73 @@ func (u *Upstream) Delete(ctx context.Context, r model.Record) error {
 	return u.client.deleteRecord(ctx, deleteParams(u.zone, r))
 }
 
+// DriftEqual implements upstream.DriftComparer. The zones/records/get
+// endpoint does not return each record's comment (see recordData/zoneRecord),
+// so List() never populates it — Comment is never compared. TTL and every
+// other applied field are read back accurately and compared normally.
+func (u *Upstream) DriftEqual(want, got model.Record) bool {
+	return want.Type == got.Type &&
+		want.Name == got.Name &&
+		want.Value == got.Value &&
+		want.TTL == got.TTL &&
+		want.Priority == got.Priority
+}
+
+// List returns every supported-type record in the zone, for upstream-
+// verification drift detection. Unlike Upsert/Delete's getRecords (scoped to
+// one domain), it lists the whole zone via listZone.
+func (u *Upstream) List(ctx context.Context) ([]model.Record, error) {
+	records, err := u.client.listZoneRecords(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("technitium list records: %w", err)
+	}
+	out := make([]model.Record, 0, len(records))
+	for _, rec := range records {
+		t := model.RecordType(rec.Type)
+		if !supported(t) {
+			continue // SRV/CAA etc.: not representable, never managed by beacons
+		}
+		out = append(out, model.Record{
+			Upstream: u.name,
+			Type:     t,
+			Name:     rec.Name,
+			Value:    recordValue(rec),
+			BaseRecord: model.BaseRecord{
+				TTL:      rec.TTL,
+				Priority: recordPriority(rec),
+			},
+		})
+	}
+	return out, nil
+}
+
+// recordValue extracts the flat Value beacons tracks for rec's type, mirroring
+// the type switch recordUpToDate and addParams use to build/compare records.
+func recordValue(rec zoneRecord) string {
+	switch rec.Type {
+	case string(model.RecordTypeA), string(model.RecordTypeAAAA):
+		return rec.RData.IPAddress
+	case string(model.RecordTypeCNAME):
+		return rec.RData.CNAME
+	case string(model.RecordTypeTXT):
+		return rec.RData.Text
+	case string(model.RecordTypeMX):
+		return rec.RData.Exchange
+	case string(model.RecordTypeNS):
+		return rec.RData.NameServer
+	default:
+		return ""
+	}
+}
+
+// recordPriority extracts MX preference; other types carry no priority.
+func recordPriority(rec zoneRecord) int {
+	if rec.Type == string(model.RecordTypeMX) {
+		return rec.RData.Preference
+	}
+	return 0
+}
+
 // ---------------------------------------------------------------------------
 // Record matching and param building
 // ---------------------------------------------------------------------------
@@ -400,6 +467,27 @@ func (c *tClient) getRecords(ctx context.Context, domain string) ([]zoneRecord, 
 	env, err := c.do(ctx, http.MethodGet, "/api/zones/records/get", url.Values{
 		"domain": {domain},
 		"zone":   {c.zone},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Records []zoneRecord `json:"records"`
+	}
+	if err := json.Unmarshal(env.Response, &out); err != nil {
+		return nil, fmt.Errorf("technitium: decode records: %w", err)
+	}
+	return out.Records, nil
+}
+
+// listZoneRecords fetches every record in the zone (domain=zone, listZone=true
+// lists the whole zone starting at the apex, rather than getRecords' single
+// domain scope).
+func (c *tClient) listZoneRecords(ctx context.Context) ([]zoneRecord, error) {
+	env, err := c.do(ctx, http.MethodGet, "/api/zones/records/get", url.Values{
+		"domain":   {c.zone},
+		"zone":     {c.zone},
+		"listZone": {"true"},
 	})
 	if err != nil {
 		return nil, err

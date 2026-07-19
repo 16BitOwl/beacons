@@ -408,6 +408,92 @@ func TestDelete_DeletesAllMatchingRecords(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// List (upstream verification)
+// ---------------------------------------------------------------------------
+
+func TestList_NoFilter_ReturnsWholeZone(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		mx := uint16(10)
+		_, _ = fmt.Fprint(w, cfOKPaged([]dnsRecord{
+			{ID: "rec1", Type: "A", Name: "web.example.com", Content: "1.2.3.4", TTL: 300},
+			{ID: "rec2", Type: "MX", Name: "example.com", Content: "mail.example.com", TTL: 300, Priority: &mx},
+		}, 1, 1))
+	}))
+	defer srv.Close()
+
+	u := newTestUpstream(srv.URL, "zone123", "example.com")
+	records, err := u.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if strings.Contains(gotQuery, "type=") || strings.Contains(gotQuery, "name=") {
+		t.Errorf("query %q should carry no name/type filter", gotQuery)
+	}
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want 2", len(records))
+	}
+	if records[0].Upstream != "test" || records[0].Type != "A" || records[0].Name != "web" || records[0].Value != "1.2.3.4" || records[0].TTL != 300 {
+		t.Errorf("record[0] = %+v, want Name %q (zone suffix stripped)", records[0], "web")
+	}
+	if records[1].Name != "example.com" {
+		t.Errorf("record[1].Name = %q, want example.com (apex unchanged)", records[1].Name)
+	}
+	if records[1].Priority != 10 {
+		t.Errorf("record[1].Priority = %d, want 10", records[1].Priority)
+	}
+}
+
+func TestShortName_StripsZoneSuffix(t *testing.T) {
+	u := newTestUpstream("http://unused", "zone123", "example.com")
+	if got := u.shortName("web.example.com"); got != "web" {
+		t.Errorf("shortName(web.example.com) = %q, want web", got)
+	}
+	if got := u.shortName("example.com"); got != "example.com" {
+		t.Errorf("shortName(example.com) = %q, want example.com (apex unchanged)", got)
+	}
+	if got := u.shortName("other.com"); got != "other.com" {
+		t.Errorf("shortName(other.com) = %q, want other.com unchanged (not this zone)", got)
+	}
+}
+
+func TestList_Pagination_FetchesAllPages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "1":
+			_, _ = fmt.Fprint(w, cfOKPaged([]dnsRecord{{ID: "rec1", Type: "A", Name: "a.example.com", Content: "1.1.1.1"}}, 1, 2))
+		default:
+			_, _ = fmt.Fprint(w, cfOKPaged([]dnsRecord{{ID: "rec2", Type: "A", Name: "b.example.com", Content: "2.2.2.2"}}, 2, 2))
+		}
+	}))
+	defer srv.Close()
+
+	u := newTestUpstream(srv.URL, "zone123", "example.com")
+	records, err := u.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(records) != 2 {
+		t.Errorf("records = %d, want 2 across both pages", len(records))
+	}
+}
+
+func TestList_APIError_ReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, cfErr(9999, "internal error"))
+	}))
+	defer srv.Close()
+
+	u := newTestUpstream(srv.URL, "zone123", "example.com")
+	if _, err := u.List(context.Background()); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Pagination
 // ---------------------------------------------------------------------------
 
