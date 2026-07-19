@@ -93,3 +93,9 @@ upstreams:
     type: pihole
     url: ${PIHOLE_URL}
     password: ${PIHOLE_PASSWORD}
+
+  technitium-home:
+    type: technitium
+    url: ${TECHNITIUM_URL}       # e.g. https://dns.example.com:53443
+    api_token: ${TECHNITIUM_TOKEN}
+    zone: example.lan

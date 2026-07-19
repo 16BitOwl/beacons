@@ -90,15 +90,18 @@ type UpstreamHTTPConfig struct {
 
 // UpstreamConfig holds the configuration for a named upstream adapter instance.
 type UpstreamConfig struct {
-	Type string `yaml:"type" validate:"required,oneof=cloudflare pihole"`
+	Type string `yaml:"type" validate:"required,oneof=cloudflare pihole technitium"`
 
-	// Cloudflare
-	APIToken string `yaml:"api_token" validate:"required_if=Type cloudflare"`
+	// Cloudflare, Technitium
+	APIToken string `yaml:"api_token" validate:"required_if=Type cloudflare,required_if=Type technitium"`
 	ZoneID   string `yaml:"zone_id"   validate:"required_if=Type cloudflare"`
 
-	// PiHole
-	URL      string `yaml:"url"      validate:"required_if=Type pihole,omitempty,url"`
+	// PiHole, Technitium
+	URL      string `yaml:"url"      validate:"required_if=Type pihole,required_if=Type technitium,omitempty,url"`
 	Password string `yaml:"password"`
+
+	// Technitium
+	Zone string `yaml:"zone" validate:"required_if=Type technitium"`
 
 	// HTTP contains HTTP client tuning shared across upstream types.
 	HTTP UpstreamHTTPConfig `yaml:"http"`

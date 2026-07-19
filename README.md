@@ -31,6 +31,7 @@ By default in the example Docker compose the `beacons` service mounts the Docker
 
 - **Cloudflare**
 - **Pi-hole** (v6+)
+- **Technitium**
 
 ## Configuration
 

@@ -857,7 +857,7 @@ func TestUpstreamConfig_MissingType(t *testing.T) {
 func TestUpstreamConfig_InvalidType(t *testing.T) {
 	err := validate.Struct(&model.UpstreamConfig{Type: "unknown"})
 	ve := mustErrors(t, err)
-	assertHasErr(t, ve, "type", "oneof=cloudflare pihole")
+	assertHasErr(t, ve, "type", "oneof=cloudflare pihole technitium")
 }
 
 // ---------------------------------------------------------------------------

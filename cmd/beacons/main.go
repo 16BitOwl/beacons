@@ -25,6 +25,7 @@ import (
 	"github.com/16bitowl/beacons/pkg/upstream"
 	upstreamcloudflare "github.com/16bitowl/beacons/pkg/upstream/cloudflare"
 	upstreampihole "github.com/16bitowl/beacons/pkg/upstream/pihole"
+	upstreamtechnitium "github.com/16bitowl/beacons/pkg/upstream/technitium"
 	"github.com/16bitowl/beacons/pkg/upstream/transport"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -268,6 +269,16 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 			RetryOptions:    httpRetryOptions(cfg.HTTP),
 			Debug:           httpDebugOptions(name, cfg.HTTP),
 		}), nil
+	case "technitium":
+		return upstreamtechnitium.New(ctx, upstreamtechnitium.Options{
+			Name:            name,
+			BaseURL:         cfg.URL,
+			APIToken:        cfg.APIToken,
+			Zone:            cfg.Zone,
+			MaxAuthFailures: cfg.HTTP.AuthFailureThreshold,
+			RetryOptions:    httpRetryOptions(cfg.HTTP),
+			Debug:           httpDebugOptions(name, cfg.HTTP),
+		})
 	default:
 		return nil, fmt.Errorf("unknown upstream type %q for %q", cfg.Type, name)
 	}
