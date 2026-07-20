@@ -43,14 +43,10 @@ type DebugLogOptions struct {
 	MaxBodyBytes int
 }
 
-// DebugLog returns a Middleware that logs every request and response in full:
-// method, complete URL, all headers, bodies, status, and duration. A shared
-// "id" field pairs request and response lines under concurrency.
-//
-// Development use only. Lines are emitted at debug level as a second gate
-// against accidental exposure, sensitive headers are redacted unless
-// RevealSecrets is set, and bodies are never redacted. Place it innermost in
-// the chain so it records the exact wire request and each retry attempt.
+// DebugLog returns a Middleware that logs every request and response in full
+// (method, URL, headers, bodies, status, duration) at debug level, paired by a
+// shared "id" field. Sensitive headers are redacted unless RevealSecrets is
+// set. Development use only; place it innermost so it records each retry attempt.
 func DebugLog(opts DebugLogOptions) Middleware {
 	if !opts.Enabled {
 		return func(next http.RoundTripper) http.RoundTripper { return next }

@@ -33,11 +33,9 @@ type Lister interface {
 }
 
 // DriftComparer lets an upstream adapter override which applied fields matter
-// for upstream-verification drift detection, for adapters that cannot
-// round-trip every field the two-way diff considers (e.g. PiHole cannot
-// represent comments at all, and its hosts entries carry no TTL on the wire).
-// An upstream that doesn't implement this is compared on every applied field
-// (Type/Name/Value/TTL/Priority/Comment) — the same set the two-way diff uses.
+// for drift detection, for adapters that cannot round-trip every field the
+// two-way diff considers. Upstreams that don't implement it are compared on
+// every applied field (Type/Name/Value/TTL/Priority/Comment).
 type DriftComparer interface {
 	// DriftEqual reports whether got (a record from List) should be considered
 	// in sync with want (desired), for drift detection. Both records carry

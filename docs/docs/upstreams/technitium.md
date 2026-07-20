@@ -25,6 +25,10 @@ upstreams:
 | `api_token` | yes | API token for the server. |
 | `zone` | yes | Zone the records belong to. |
 
+## Supported record types
+
+`A`, `AAAA`, `CNAME`, `TXT`, `MX`, `NS`. `SRV` and `CAA` are not supported.
+
 Technitium is typically self-hosted, so a shorter [`verify_interval`](./index.md#verify-interval) is fine.
 
 See also: [shared HTTP tuning](./index.md#http), [drift detection](./index.md#verify-interval), and [debug logging](./index.md#debug).

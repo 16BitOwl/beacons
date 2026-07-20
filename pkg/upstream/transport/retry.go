@@ -40,19 +40,10 @@ func (o RetryOptions) withDefaults() RetryOptions {
 	return o
 }
 
-// Retry returns a Middleware that retries transient failures with exponential
-// backoff and ±25% jitter.
-//
-// Retried conditions: network errors, HTTP 429, 500, 502, 503, 504.
-// On HTTP 429, the Retry-After response header is honored if present, capped
-// at MaxDelay.
-// Errors wrapping [ErrAuthFailed] are permanent and never retried.
-//
-// Requests with a non-resettable body (GetBody == nil) are not retried after
-// the first attempt.
-//
-// Each retry attempt is sent on a clone of req; the original request passed
-// to RoundTrip is never mutated, per the http.RoundTripper contract.
+// Retry returns a Middleware that retries transient failures (network errors,
+// HTTP 429/500/502/503/504) with exponential backoff and ±25% jitter, honoring
+// Retry-After on 429. Errors wrapping [ErrAuthFailed] and requests with a
+// non-resettable body are not retried. Each attempt uses a clone of req.
 func Retry(opts RetryOptions) Middleware {
 	opts = opts.withDefaults()
 	return func(next http.RoundTripper) http.RoundTripper {

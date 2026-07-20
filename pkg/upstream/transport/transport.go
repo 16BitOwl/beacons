@@ -1,18 +1,6 @@
 // Package transport provides composable http.RoundTripper middleware for
-// upstream HTTP clients.
-//
-// Build a transport by chaining middleware with [Chain]:
-//
-//	t := transport.Chain(nil,
-//	    transport.Retry(retryOpts),
-//	    transport.Bearer(apiToken),
-//	)
-//	client := &http.Client{Transport: t}
-//
-// Middleware is applied in declaration order: the first entry is outermost
-// (first to see the request, last to see the response). In the example above
-// Retry wraps Bearer, so each retry attempt passes through Bearer and gets a
-// fresh set of request headers.
+// upstream HTTP clients. Middleware is applied in declaration order: the first
+// entry is outermost (first to see the request, last to see the response).
 package transport
 
 import (
@@ -27,10 +15,8 @@ const defaultAttemptTimeout = 15 * time.Second
 type ClientOptions struct {
 	// Name identifies the upstream in circuit-breaker log messages. Optional.
 	Name string
-	// Timeout bounds each individual attempt — including any session-auth
-	// exchange and reading the response body — not the retry chain as a whole.
-	// Backoff sleeps between attempts are therefore never charged against it.
-	// Zero uses the default (15s).
+	// Timeout bounds each individual attempt (including session-auth exchange
+	// and response body read), not the retry chain. Zero uses the default (15s).
 	Timeout time.Duration
 	// Retry configures the retry middleware. Zero values use the retry defaults.
 	Retry RetryOptions
@@ -45,18 +31,11 @@ type ClientOptions struct {
 	Debug DebugLogOptions
 }
 
-// NewClient builds an *http.Client whose transport applies the canonical
-// resilience middleware in order: CircuitBreaker (outermost) → Retry →
-// AttemptTimeout → Auth → DebugLog (when enabled).
-//
-// This is the single construction path every upstream adapter should use so
-// that retry, backoff, and circuit-breaking behavior is identical across
-// providers. Adapters only supply their authentication middleware.
-//
-// The timeout sits inside Retry so each attempt gets a fresh deadline; the
-// returned client deliberately has no http.Client.Timeout, which would cap the
-// entire retry chain including backoff sleeps. Total time is still bounded by
-// MaxAttempts × (Timeout + MaxDelay).
+// NewClient builds an *http.Client applying the canonical resilience chain,
+// outermost first: CircuitBreaker → Retry → AttemptTimeout → Auth → DebugLog.
+// Every upstream adapter uses this path; adapters supply only their auth
+// middleware. The timeout sits inside Retry (per-attempt, not whole-chain), so
+// the client sets no http.Client.Timeout.
 func NewClient(opts ClientOptions) *http.Client {
 	timeout := opts.Timeout
 	if timeout <= 0 {

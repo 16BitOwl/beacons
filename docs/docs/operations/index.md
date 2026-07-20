@@ -9,3 +9,4 @@ Running Beacons in practice.
 
 - [HTTP & metrics](./http-metrics.md) — endpoints, auth, Prometheus metrics.
 - [Drift detection](./drift-detection.md) — periodic reconcile and upstream verification.
+- [Resilience](./resilience.md) — retry, circuit breaker, and session auth behavior.

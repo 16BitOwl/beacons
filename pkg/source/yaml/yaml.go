@@ -52,18 +52,11 @@ func New(opts Options) *Source {
 func (s *Source) Name() string { return s.name }
 
 // Snapshot reads every file matching the glob and returns all records found.
-//
-// A read failure (glob error or any file that fails to parse) must never be
-// mistaken for "no records": it returns a non-nil error so the caller keeps the
-// last good state. A clean read that matches no files returns a nil slice and a
-// nil error — a legitimate "nothing desired." ctx is unused today but part of
-// the Snapshotter contract.
-//
-// filepath.Glob returns zero matches for both a genuinely empty directory and a
-// vanished one (dropped bind mount, unmounted volume, perm blip). The latter
-// must not read as "delete everything," so a zero-match result is only trusted
-// when the glob's base directory is actually present; otherwise it is a read
-// failure and the last good state is kept.
+// A read failure returns a non-nil error so the caller keeps the last good
+// state; a clean zero-match read returns nil, nil ("nothing desired"). Zero
+// matches are only trusted when the glob's base directory exists — a vanished
+// directory (dropped mount, perm blip) is treated as a read failure, not a
+// signal to delete everything.
 func (s *Source) Snapshot(_ context.Context) ([]model.Record, error) {
 	files, err := filepath.Glob(s.glob)
 	if err != nil {
@@ -178,17 +171,8 @@ func (s *Source) Notify(ctx context.Context, ch chan<- struct{}) {
 	}
 }
 
-// fileRecord mirrors the YAML schema for a single record entry.
-// Schema matches the label schema: record-id → upstream → fields.
-//
-//	records:
-//	  web:
-//	    ttl: 300
-//	    cloudflare:
-//	      type: CNAME
-//	      name: svc.domain.com
-//	      value: domain.com
-//	      ttl: 3600
+// fileRecord mirrors the YAML schema for a single record entry
+// (record-id → upstream → fields).
 type fileRecord struct {
 	TTL      int                       `yaml:"ttl"`
 	Priority int                       `yaml:"priority"`

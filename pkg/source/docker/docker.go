@@ -167,14 +167,7 @@ func (s *Source) Notify(ctx context.Context, ch chan<- struct{}) {
 	}
 }
 
-// parseLabels extracts DNS records from Docker labels following the schema:
-//
-//	dns.enable=true
-//	dns.ttl=300                          (base default)
-//	dns.<record-id>.<upstream>.name=...
-//	dns.<record-id>.<upstream>.type=...
-//	dns.<record-id>.<upstream>.value=...
-//	dns.<record-id>.<upstream>.ttl=...   (overrides base)
+// parseLabels extracts DNS records from a container's dns.* labels.
 func parseLabels(sourceName, containerID string, labels map[string]string, defaults model.BaseRecord, strictValidation bool) ([]model.Record, error) {
 	if labels[labelPrefix+"enable"] != "true" {
 		return nil, nil
