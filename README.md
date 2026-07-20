@@ -1,6 +1,6 @@
 # Beacons
 
-Beacons watches Docker containers and static YAML files for DNS record definitions and syncs them to one or more upstream DNS providers. When a container starts or stops, its records are created or removed automatically.
+Beacons watches Docker containers and static YAML files for DNS record definitions and syncs them to one or more upstream DNS providers. When a container starts or stops, its records are created or removed automatically. A periodic reconcile loop re-checks the desired state against each upstream, and optional drift detection (per-upstream `verify_interval`) restores records that were hand-edited or deleted upstream.
 
 ## Running with Docker Compose
 
@@ -87,12 +87,13 @@ The auth method is pluggable, so other schemes can be added later without changi
 
 ### Application metrics
 
-In addition to the standard Go metrics, these application specific metrics are also instrumented:
+In addition to the standard Go/process collectors (`go_*`, `process_*`), these application specific metrics are also instrumented:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `beacons_sync_operations_total` | counter | Sync operations by `upstream`, `operation`, `result` |
+| `beacons_sync_operations_total` | counter | Sync operations by `upstream`, `operation` (`upsert`, `delete`, `list`), `result` (`success`, `failure`) |
 | `beacons_sync_duration_seconds` | histogram | Upstream call latency by `upstream`, `operation` |
+| `beacons_drift_corrections_total` | counter | Drift corrections applied by `upstream`, `reason` (`missing`, `changed`) |
 
 ## Building
 
@@ -120,6 +121,17 @@ A [Bruno](https://www.usebruno.com/) collection for the HTTP endpoints lives in 
 Create an issue on Github before starting any work that you wish to merge into this project. Any PR:s without a relevant issue will be ignored.
 
 When adding a new upstream or source, implement the relevant interface in `pkg/upstream` or `pkg/source` respectively and register it in `cmd/beacons/main.go`. Keep new config fields in the appropriate struct in `internal/config` and document them in `beacons.example.yaml`.
+
+### Docs
+
+The documentation site (under `docs/`) is built with [Docusaurus](https://docusaurus.io/). It is its own Node package (`docs/package.json`), separate from the Go project.
+
+```sh
+make docs-serve   # live preview at http://localhost:3000/beacons/
+make docs-build   # production build into docs/build
+```
+
+CI (`.github/workflows/docs.yml`) builds and deploys to GitHub Pages on pushes to `main` that touch `docs/`. A single current version is published; Docusaurus has built-in versioning we can enable later if needed. See [`docs/README.md`](docs/README.md).
 
 ### Debug logging
 

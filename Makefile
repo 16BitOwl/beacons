@@ -3,7 +3,7 @@ IMAGE      := beacons
 VERSION    ?= dev
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-.PHONY: build docker run fmt vet lint test vulncheck tidy clean
+.PHONY: build docker run fmt vet lint test vulncheck tidy clean docs-serve docs-build
 
 ## build: compile for Linux (the only supported target)
 build:
@@ -41,6 +41,15 @@ vulncheck:
 tidy:
 	go mod tidy
 
+## docs-serve: live-preview the docs site at http://localhost:3000/beacons/
+docs-serve:
+	cd docs && pnpm install && pnpm start
+
+## docs-build: build the docs site into docs/build (matches CI)
+docs-build:
+	cd docs && pnpm install --frozen-lockfile && pnpm build
+
 ## clean: remove build artifacts
 clean:
 	rm -f $(BINARY)
+	rm -rf docs/build docs/.docusaurus

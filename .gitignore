@@ -44,6 +44,11 @@ config/dev.yaml
 # Notes
 notes/
 
+# Docusaurus docs build output
+docs/build/
+docs/.docusaurus/
+docs/node_modules/
+
 # LLMs and agents
 skills-lock.json
 .kiro
