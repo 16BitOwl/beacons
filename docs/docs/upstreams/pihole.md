@@ -5,12 +5,24 @@ sidebar_position: 2
 
 # Pi-hole
 
-:::info
+Syncs records to a Pi-hole instance. Targets Pi-hole v6 and later.
 
-Scaffold placeholder. Full content to be migrated from `README.md` and
-`beacons.example.yaml`.
+## Configuration
 
-:::
+```yaml
+upstreams:
+  pihole-home:
+    type: pihole
+    url: ${PIHOLE_URL}
+    password: ${PIHOLE_PASSWORD}
+    verify_interval: 60
+```
 
-Targets Pi-hole v6+. Requires `url` and `password`. Supports `verify_interval`
-drift detection.
+| Field | Required | Description |
+|-------|----------|-------------|
+| `url` | yes | Base URL of the Pi-hole instance. |
+| `password` | yes | Admin password used to authenticate. |
+
+Pi-hole is typically self-hosted, so a shorter [`verify_interval`](./index.md#verify-interval) is fine.
+
+See also: [shared HTTP tuning](./index.md#http), [drift detection](./index.md#verify-interval), and [debug logging](./index.md#debug). With `debug_log_secrets` enabled, the Pi-hole authentication exchange is also logged.

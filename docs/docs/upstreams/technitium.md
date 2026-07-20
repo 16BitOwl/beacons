@@ -5,12 +5,26 @@ sidebar_position: 3
 
 # Technitium
 
-:::info
+Syncs records to a zone on a Technitium DNS server.
 
-Scaffold placeholder. Full content to be migrated from `README.md` and
-`beacons.example.yaml`.
+## Configuration
 
-:::
+```yaml
+upstreams:
+  technitium-home:
+    type: technitium
+    url: ${TECHNITIUM_URL}       # e.g. https://dns.example.com:53443
+    api_token: ${TECHNITIUM_TOKEN}
+    zone: example.lan
+    verify_interval: 60
+```
 
-Requires `url`, `api_token`, and `zone`. Supports `verify_interval` drift
-detection.
+| Field | Required | Description |
+|-------|----------|-------------|
+| `url` | yes | Base URL of the Technitium server. |
+| `api_token` | yes | API token for the server. |
+| `zone` | yes | Zone the records belong to. |
+
+Technitium is typically self-hosted, so a shorter [`verify_interval`](./index.md#verify-interval) is fine.
+
+See also: [shared HTTP tuning](./index.md#http), [drift detection](./index.md#verify-interval), and [debug logging](./index.md#debug).

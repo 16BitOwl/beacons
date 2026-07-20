@@ -5,24 +5,43 @@ sidebar_position: 2
 
 # Getting started
 
-:::info
+Beacons ships as a container image. The quickest way to run it is with Docker Compose.
 
-Scaffold placeholder. Full content to be migrated from `README.md`.
+## Images
+
+Published to both registries:
+
+- Docker Hub — `16bitowl/beacons:<tag>`
+- GitHub Container Registry — `ghcr.io/16bitowl/beacons:<tag>`
+
+## Quick start
+
+1. Copy `beacons.example.yaml` to `beacons.yaml` and configure your sources and upstreams. See [Configuration](./configuration.md).
+2. Copy `.env.example` to `.env` and fill in your API tokens and passwords. The config references these via `${VAR}` syntax.
+3. Start the service:
+
+   ```sh
+   docker compose up -d
+   ```
+
+:::tip
+
+Set `sync.dry_run: true` on the first run. Beacons then logs the records it would create, update, or delete without touching any upstream — verify discovery is correct before pushing to your DNS providers.
 
 :::
 
-Images are published to Docker Hub (`16bitowl/beacons:<tag>`) and GitHub
-Container Registry (`ghcr.io/16bitowl/beacons:<tag>`).
+## What the compose file mounts
 
-Quick start:
+In the example Docker Compose file the `beacons` service mounts:
 
-1. Copy `beacons.example.yaml` to `beacons.yaml` and configure your sources and upstreams.
-2. Copy `.env.example` to `.env` and fill in your API tokens/passwords.
-3. Run `docker compose up -d`.
+- the Docker socket — so the Docker source can read container labels;
+- `beacons.yaml` — the main config file;
+- a static config directory — for YAML source files matched by a glob;
+- a data volume — persistent store state across restarts (see [`store` config](./configuration.md#store)).
 
-:::info
+## Next steps
 
-Set `sync.dry_run: true` on the first run to verify records are discovered
-correctly before anything is pushed to your DNS providers.
-
-:::
+- [Configuration](./configuration.md) — every config field and env-var override.
+- [Sources](./sources/index.md) — define records via Docker labels or YAML.
+- [Upstreams](./upstreams/index.md) — connect Cloudflare, Pi-hole, or Technitium.
+- [Operations](./operations/index.md) — health, metrics, and drift detection.
