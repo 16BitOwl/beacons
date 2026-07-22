@@ -27,6 +27,8 @@ type CircuitBreakerOptions struct {
 	// MaxAuthFailures is the number of consecutive HTTP 401 responses that open
 	// the circuit. Zero uses the default (5).
 	MaxAuthFailures int
+	// Recorder is optional.
+	Recorder MetricsRecorder
 }
 
 // CircuitBreaker returns a Middleware that opens after MaxAuthFailures
@@ -44,6 +46,7 @@ func CircuitBreaker(opts CircuitBreakerOptions) Middleware {
 			next:     next,
 			name:     opts.Name,
 			maxFails: maxFails,
+			recorder: opts.Recorder,
 		}
 	}
 }
@@ -52,6 +55,7 @@ type circuitBreakerTransport struct {
 	next         http.RoundTripper
 	name         string
 	maxFails     int32
+	recorder     MetricsRecorder
 	authFailures atomic.Int32
 	disabled     atomic.Bool
 }
@@ -88,6 +92,9 @@ func (t *circuitBreakerTransport) recordAuthFailure(causeKey string, cause any) 
 			"upstream", t.name,
 			causeKey, cause,
 			"consecutive_auth_failures", n)
+		if t.recorder != nil {
+			t.recorder.SetCircuitBreakerOpen(t.name, true)
+		}
 	}
 }
 

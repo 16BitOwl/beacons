@@ -135,6 +135,9 @@ func (e *Executor) applyUpstream(ctx context.Context, u upstream.Upstream, ops [
 			continue
 		}
 		if t, gated := e.nextRetry[model.RecordKey(op.Record)]; gated && now.Before(t) {
+			if e.metrics != nil {
+				e.metrics.RecordBackoffGated(op.Record.Upstream)
+			}
 			results[i] = applyResult{skip: true}
 			continue
 		}
