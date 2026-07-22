@@ -19,6 +19,7 @@ import (
 	"github.com/16bitowl/beacons/internal/reconcile"
 	"github.com/16bitowl/beacons/internal/registry"
 	"github.com/16bitowl/beacons/internal/server"
+	"github.com/16bitowl/beacons/internal/validateconfig"
 	"github.com/16bitowl/beacons/pkg/source"
 	sourcedocker "github.com/16bitowl/beacons/pkg/source/docker"
 	sourceyaml "github.com/16bitowl/beacons/pkg/source/yaml"
@@ -42,6 +43,7 @@ func main() {
 	doHealthcheck := flag.Bool("healthcheck", false, "hit /healthz and exit 0/1 (for use as Docker HEALTHCHECK)")
 	healthAddr := flag.String("healthcheck-addr", "http://localhost:9090", "base URL for -healthcheck")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	validateConfig := flag.Bool("validate-config", false, "parse the config and any YAML source files, then exit 0/1; does not contact Docker or upstream APIs or start the server")
 	flag.Parse()
 
 	if *showVersion {
@@ -65,6 +67,27 @@ func main() {
 		slog.Error("failed to load config",
 			"err", err)
 		os.Exit(1)
+	}
+
+	if *validateConfig {
+		build := func(name string, scfg model.SourceConfig, defaults model.BaseRecord, strictEnv, strictValidation bool) (source.Snapshotter, error) {
+			return buildSource(buildSourceOptions{
+				Name:             name,
+				Config:           scfg,
+				Defaults:         defaults,
+				StrictEnv:        strictEnv,
+				StrictValidation: strictValidation,
+			})
+		}
+		if err := validateconfig.Run(context.Background(), cfg, build); err != nil {
+			slog.Error("config validation failed",
+				"err", err)
+			os.Exit(1)
+		}
+		slog.Info("config valid",
+			"sources", len(cfg.Sources),
+			"upstreams", len(cfg.Upstreams))
+		os.Exit(0)
 	}
 
 	if cfg.Sync.DryRun {

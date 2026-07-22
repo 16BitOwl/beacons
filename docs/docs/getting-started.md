@@ -45,3 +45,4 @@ In the example Docker Compose file the `beacons` service mounts:
 - [Sources](./sources/index.md) — define records via Docker labels or YAML.
 - [Upstreams](./upstreams/index.md) — connect Cloudflare, Pi-hole, or Technitium.
 - [Operations](./operations/index.md) — health, metrics, and drift detection.
+- [CLI flags](./operations/cli.md) — every flag, including config validation.
