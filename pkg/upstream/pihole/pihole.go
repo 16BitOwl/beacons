@@ -22,14 +22,9 @@ const attemptTimeout = 10 * time.Second
 // sidHeader carries the PiHole session token on authenticated requests.
 const sidHeader = "X-FTL-SID"
 
-// Upstream is the PiHole upstream adapter.
-// Supports A, AAAA and CNAME records via the PiHole v6 config API.
-// Other record types are not supported by PiHole.
-//
-// Authentication, retry, and circuit-breaking are handled by the transport
-// middleware chain on client; session tokens are acquired via authenticate,
-// which uses authClient (a plain retrying client with no session middleware, to
-// avoid recursion).
+// Upstream is the PiHole upstream adapter, targeting the v6 config API.
+// Resilience runs on client's transport chain; session tokens are acquired via
+// authenticate over authClient, which omits session middleware to avoid recursion.
 type Upstream struct {
 	name       string
 	baseURL    string
@@ -76,12 +71,9 @@ func New(opts Options) *Upstream {
 		name:     opts.Name,
 		baseURL:  strings.TrimRight(opts.BaseURL, "/"),
 		password: opts.Password,
-		// authClient acquires sessions: it retries transient failures but carries
-		// no session middleware (there is no token yet) and no circuit breaker.
-		// A breaker here is unnecessary: authenticate wraps rejected credentials
-		// in ErrAuthFailed, which propagates through SessionAuth into the runtime
-		// client's breaker, so repeated auth failures still disable the upstream.
-		// The timeout is per attempt, matching the runtime client.
+		// authClient acquires sessions: retries only, no session middleware (no
+		// token yet) and no breaker. Rejected credentials wrap ErrAuthFailed,
+		// which reaches the runtime client's breaker via SessionAuth.
 		authClient: &http.Client{
 			Transport: transport.Chain(nil,
 				transport.Retry(opts.RetryOptions),

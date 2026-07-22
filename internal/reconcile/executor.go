@@ -90,13 +90,9 @@ type applyResult struct {
 }
 
 // Apply executes plan against the upstreams and persists results. recorded is
-// the store state from this pass, used to carry forward per-record failure
-// counts onto desired records (which lack sync-status fields).
-//
-// If the store is a registry.Batcher, the whole pass's store writes are
-// deferred into one Batch call so a backend like FileStore, whose per-write
-// cost scales with total record count, pays that cost once per pass instead
-// of once per changed record.
+// this pass's store state, used to carry forward per-record failure counts onto
+// desired records. If the store is a registry.Batcher, the pass's writes are
+// deferred into one Batch call.
 func (e *Executor) Apply(ctx context.Context, plan Plan, recorded []model.Record) {
 	if b, ok := e.store.(registry.Batcher); ok {
 		_ = b.Batch(func() error {

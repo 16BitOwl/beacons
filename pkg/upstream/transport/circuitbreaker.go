@@ -29,25 +29,11 @@ type CircuitBreakerOptions struct {
 	MaxAuthFailures int
 }
 
-// CircuitBreaker returns a Middleware that opens the circuit after too many
-// consecutive authentication failures — HTTP 401 (Unauthorized) or 403
-// (Forbidden) responses, or errors wrapping [ErrAuthFailed] (a session
-// authenticator whose credentials were rejected) — preventing further requests
-// from reaching the upstream.
-//
-// All of these indicate a credentials or permissions problem that will not
-// self-heal without a configuration change and restart.
-//
-// Once open, every call returns ErrCircuitOpen without making a network
-// request. The circuit stays open for the lifetime of the process; recovering
-// requires fixing the credentials and restarting.
-//
-// The failure counter resets to zero on any non-401/403 response, so transient
-// failures don't accumulate against the threshold.
-//
-// Scope: this is an authentication killswitch, not general outage protection.
-// It deliberately never trips on 5xx or network errors — those are transient and
-// handled by Retry; tripping on them would disable an upstream during a blip.
+// CircuitBreaker returns a Middleware that opens after MaxAuthFailures
+// consecutive authentication failures (HTTP 401/403 or errors wrapping
+// [ErrAuthFailed]) and returns ErrCircuitOpen for the process lifetime. The
+// counter resets on any non-auth response. It never trips on 5xx or network
+// errors — those are Retry's job.
 func CircuitBreaker(opts CircuitBreakerOptions) Middleware {
 	maxFails := int32(opts.MaxAuthFailures)
 	if maxFails <= 0 {

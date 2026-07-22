@@ -34,6 +34,8 @@ upstreams:
 | `retry_max_delay_ms` | Backoff cap in ms. |
 | `auth_failure_threshold` | Consecutive HTTP 401 responses that disable the upstream until restart (`0` uses the default of 5). |
 
+See [Resilience](../operations/resilience.md) for how retry, backoff, and the circuit breaker behave.
+
 ## Drift detection {#verify-interval}
 
 Any upstream can set `verify_interval` (seconds) to have the reconciler read its actual records back and restore ones that were hand-edited or deleted out of band. `0` (default) disables verification for that upstream. Respect provider rate limits when setting it — keep API-metered providers like Cloudflare in the minutes range; self-hosted providers can go lower. See [Drift detection](../operations/drift-detection.md).

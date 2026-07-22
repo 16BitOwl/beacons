@@ -7,25 +7,13 @@ import (
 	"github.com/16bitowl/beacons/internal/model"
 )
 
-// upstreamVerification carries one pass's upstream-verification results into
-// diff (see UpstreamCollector and reconcile.go's buildDriftComparers):
-//
-//   - Actual holds the records an upstream's List call returned this pass,
-//     keyed by upstream name.
-//   - Fetched marks which upstreams produced fresh data this pass. Where an
-//     upstream is absent from Fetched (not due yet, not a Lister, or List
-//     failed), its records are never checked for drift — behavior is
-//     byte-identical to plain two-way diff.
-//   - Compare resolves each upstream's drift-equality function: its own
-//     upstream.DriftComparer override, or nil to fall back to appliedEqual
-//     (the same field set the two-way diff uses). This lives here rather than
-//     as a shared heuristic in diff, because which applied fields an upstream
-//     can actually round-trip (e.g. PiHole cannot represent comments at all,
-//     and its hosts entries carry no TTL) is adapter-specific knowledge that
-//     diff has no business guessing at.
+// upstreamVerification carries one pass's upstream-verification results into diff.
 type upstreamVerification struct {
-	Actual  map[string][]model.Record
+	// Actual: records each upstream's List returned this pass, keyed by name.
+	Actual map[string][]model.Record
+	// Fetched: upstreams with fresh data this pass; absent ones are not drift-checked.
 	Fetched map[string]bool
+	// Compare: per-upstream drift-equality fn; nil falls back to appliedEqual.
 	Compare map[string]func(want, got model.Record) bool
 }
 
@@ -179,18 +167,11 @@ func driftDetail(want, got model.Record, hasGot bool) string {
 	return strings.Join(diffs, "; ")
 }
 
-// driftCorrection reports whether the store's belief that want is already
-// synced disagrees with this pass's upstream-fetched state, and if so the op
-// that self-heals it. Only meaningful when upstreams.Fetched[want.Upstream] is
-// true — otherwise (not due yet, not a Lister, or this pass's List failed) the
-// store is always trusted, which is safe by construction.
-//
-// A record with the exact same content on the upstream (naturalKey hit) can
-// still drift on fields the upstream's comparator weighs (e.g. TTL,
-// Priority), so it is re-checked with cmp rather than treated as an automatic
-// match; that also keeps round-robin records (same name+type, distinct
-// values) each compared against their own upstream entry instead of whichever
-// one happens to be first for that name+type.
+// driftCorrection reports whether upstream-fetched state disagrees with the
+// store's belief that want is synced, and if so the self-healing op. Only acts
+// when upstreams.Fetched[want.Upstream] is true; otherwise the store is trusted.
+// An exact-content (naturalKey) hit is still re-checked with cmp, since fields
+// like TTL/Priority can drift and round-robin records must match their own entry.
 func driftCorrection(idx actualIndex, upstreams upstreamVerification, want model.Record) (Op, bool) {
 	if !upstreams.Fetched[want.Upstream] {
 		return Op{}, false

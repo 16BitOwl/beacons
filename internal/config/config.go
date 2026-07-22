@@ -36,10 +36,9 @@ type Config struct {
 
 // LogConfig controls logging behavior.
 type LogConfig struct {
-	// RevealValues includes env-override values in debug logs, which otherwise
-	// log keys only. Those values might be secrets (API tokens, passwords), so it
-	// defaults to false. Dev-only; must be set in the config file since it governs
-	// the env-overlay logging itself. Also requires debug-level logging.
+	// RevealValues includes env-override values (possibly secrets) in debug
+	// logs, which otherwise log keys only. Dev-only; must be set in the config
+	// file (it governs the env-overlay logging) and requires debug-level logging.
 	RevealValues bool `yaml:"reveal_values"`
 }
 

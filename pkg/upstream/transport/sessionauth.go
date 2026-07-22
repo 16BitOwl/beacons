@@ -25,19 +25,14 @@ type Session struct {
 	ExpiresIn time.Duration
 }
 
-// ErrAuthFailed marks a permanent authentication failure: the upstream rejected
-// the credentials themselves, not just an expired token. Authenticator
-// implementations must wrap it (fmt.Errorf("...: %w", transport.ErrAuthFailed))
-// when the auth endpoint rejects the configured credentials, so that Retry does
-// not retry the error and CircuitBreaker counts it towards disabling the
-// upstream. Detect it with errors.Is.
+// ErrAuthFailed marks a permanent credential rejection (not an expired token).
+// Authenticators must wrap it with %w so Retry skips it and CircuitBreaker
+// counts it. Detect with errors.Is.
 var ErrAuthFailed = errors.New("transport: authentication failed")
 
-// Authenticator acquires a session token. It is invoked by SessionAuth on first
-// use and whenever the cached token is rejected with HTTP 401. Implementations
-// must perform their own HTTP exchange using a client that does NOT route back
-// through the SessionAuth middleware, to avoid recursion. Permanent credential
-// rejections must be wrapped with [ErrAuthFailed].
+// Authenticator acquires a session token, invoked on first use and on HTTP 401.
+// Implementations must use a client that does NOT route back through SessionAuth
+// (avoids recursion) and wrap permanent rejections with [ErrAuthFailed].
 type Authenticator func(ctx context.Context) (Session, error)
 
 // SessionAuthOptions configures the SessionAuth middleware.
@@ -51,23 +46,12 @@ type SessionAuthOptions struct {
 	EarlyExpiry time.Duration
 }
 
-// SessionAuth returns a Middleware that manages a cached session token.
-//
-// It acquires a token via the Authenticator, caches it until shortly before it
-// expires, and sets it on the configured request header. If a request comes
-// back with HTTP 401, it invalidates the cached token, re-authenticates once,
-// and retries the request a single time. A request whose body cannot be
-// replayed (GetBody == nil) is not retried.
-//
-// Concurrent callers that all get a 401 off the same cached token share one
-// re-authentication: each 401 carries the token generation it was rejected on,
-// and ensureToken only calls Authenticate if the cache is still on that
-// generation. A caller that loses the race just reuses whatever the winner
-// fetched instead of piling another request onto the auth endpoint.
-//
-// Place SessionAuth innermost in the chain (closest to the base transport) so a
-// persistent 401 — one that survives re-authentication — still propagates
-// outward to Retry (which ignores it) and CircuitBreaker (which counts it).
+// SessionAuth returns a Middleware that caches a session token from the
+// Authenticator, sets it on the configured header, and on HTTP 401
+// re-authenticates once and retries a single time (unless the body is
+// non-replayable). Concurrent 401s off the same token share one
+// re-authentication via the generation counter. Place it innermost so a
+// persistent 401 still reaches Retry and CircuitBreaker.
 func SessionAuth(opts SessionAuthOptions) Middleware {
 	if opts.EarlyExpiry <= 0 {
 		opts.EarlyExpiry = defaultSessionEarlyExpiry

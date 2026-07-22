@@ -1,20 +1,7 @@
 // Package technitium implements the Upstream adapter for Technitium DNS
-// Server (https://technitium.com/dns/).
-//
-// Written against a Technitium DNS Server v15+ HTTP API (APIDOCS.md in the
-// DnsServer repo): auth uses the Authorization: Bearer header directly (the
-// `token` query parameter documented there is backward-compat only, kept for
-// pre-v15 servers). Zone record endpoints are RPC-style and take every field
-// as a query/form parameter rather than a JSON body; record and parameter
-// names have changed across major server versions in the past, so re-check
-// APIDOCS.md before upgrading the target server.
-//
-// Supports A, AAAA, CNAME, TXT, MX and NS records. SRV and CAA are not
-// supported: Technitium requires structured fields (weight/port for SRV,
-// flags/tag for CAA) that model.Record's flat Value/Priority pair cannot
-// carry — the same limitation the Cloudflare adapter hits for these two
-// types. Extending model.Record with type-specific structured fields would
-// resolve this for both adapters.
+// Server. Targets the v15+ HTTP API: Authorization: Bearer auth (the `token`
+// query parameter is pre-v15 backward-compat) and RPC-style zone record
+// endpoints that take fields as query/form parameters.
 package technitium
 
 import (
