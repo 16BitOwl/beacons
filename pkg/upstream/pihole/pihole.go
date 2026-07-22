@@ -58,6 +58,8 @@ type Options struct {
 	// Debug enables full request/response logging. The auth exchange is only
 	// logged with RevealSecrets, as its body carries the password.
 	Debug transport.DebugLogOptions
+	// Metrics is optional.
+	Metrics transport.MetricsRecorder
 }
 
 func New(opts Options) *Upstream {
@@ -94,7 +96,8 @@ func New(opts Options) *Upstream {
 			Header:       sidHeader,
 			Authenticate: u.authenticate,
 		}),
-		Debug: opts.Debug,
+		Debug:   opts.Debug,
+		Metrics: opts.Metrics,
 	})
 	return u
 }

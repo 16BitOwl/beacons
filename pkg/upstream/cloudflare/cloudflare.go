@@ -30,6 +30,8 @@ type Options struct {
 	MaxAuthFailures int                    // consecutive 401s before disabling; 0 uses transport default
 	// Debug enables full request/response logging. Development use only.
 	Debug transport.DebugLogOptions
+	// Metrics is optional.
+	Metrics transport.MetricsRecorder
 }
 
 // Upstream is the Cloudflare upstream adapter.
@@ -50,6 +52,7 @@ func New(ctx context.Context, opts Options) (*Upstream, error) {
 			MaxAuthFailures: opts.MaxAuthFailures,
 			Auth:            transport.Bearer(opts.APIToken),
 			Debug:           opts.Debug,
+			Metrics:         opts.Metrics,
 		}),
 		zoneID:  opts.ZoneID,
 		baseURL: apiBase,
@@ -68,6 +71,7 @@ func New(ctx context.Context, opts Options) (*Upstream, error) {
 			MaxAuthFailures: opts.MaxAuthFailures,
 			Auth:            transport.Bearer(opts.APIToken),
 			Debug:           opts.Debug,
+			Metrics:         opts.Metrics,
 		}),
 		zoneID:  opts.ZoneID,
 		baseURL: apiBase,

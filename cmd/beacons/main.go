@@ -100,11 +100,16 @@ func main() {
 	pollInterval := time.Duration(cfg.Sync.PollInterval) * time.Second
 	debounceDelay := time.Duration(cfg.Sync.DebounceDelay) * time.Millisecond
 
+	// Set up Prometheus registry and metrics.
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	m := metrics.New(reg)
+
 	// Build upstreams
 	upstreams := make(map[string]upstream.Upstream, len(cfg.Upstreams))
 	upstreamVerifyInterval := make(map[string]time.Duration, len(cfg.Upstreams))
 	for name, ucfg := range cfg.Upstreams {
-		u, err := buildUpstream(ctx, name, ucfg)
+		u, err := buildUpstream(ctx, name, ucfg, m)
 		if err != nil {
 			slog.Error("upstream failed to initialize, disabling until restart; fix the configuration and restart Beacons",
 				"name", name,
@@ -147,11 +152,6 @@ func main() {
 			"err", err)
 		os.Exit(1)
 	}
-
-	// Set up Prometheus registry and metrics.
-	reg := prometheus.NewRegistry()
-	reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
-	m := metrics.New(reg)
 
 	reconcileInterval := time.Duration(cfg.Sync.ReconcileInterval) * time.Second
 
@@ -275,7 +275,7 @@ func buildStore(cfg config.StoreConfig) (registry.Store, error) {
 	}
 }
 
-func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (upstream.Upstream, error) {
+func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig, m *metrics.Metrics) (upstream.Upstream, error) {
 	switch cfg.Type {
 	case "cloudflare":
 		return upstreamcloudflare.New(ctx, upstreamcloudflare.Options{
@@ -285,6 +285,7 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 			MaxAuthFailures: cfg.HTTP.AuthFailureThreshold,
 			RetryOptions:    httpRetryOptions(cfg.HTTP),
 			Debug:           httpDebugOptions(name, cfg.HTTP),
+			Metrics:         m,
 		})
 	case "pihole":
 		return upstreampihole.New(upstreampihole.Options{
@@ -294,6 +295,7 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 			MaxAuthFailures: cfg.HTTP.AuthFailureThreshold,
 			RetryOptions:    httpRetryOptions(cfg.HTTP),
 			Debug:           httpDebugOptions(name, cfg.HTTP),
+			Metrics:         m,
 		}), nil
 	case "technitium":
 		return upstreamtechnitium.New(ctx, upstreamtechnitium.Options{
@@ -304,6 +306,7 @@ func buildUpstream(ctx context.Context, name string, cfg model.UpstreamConfig) (
 			MaxAuthFailures: cfg.HTTP.AuthFailureThreshold,
 			RetryOptions:    httpRetryOptions(cfg.HTTP),
 			Debug:           httpDebugOptions(name, cfg.HTTP),
+			Metrics:         m,
 		})
 	default:
 		return nil, fmt.Errorf("unknown upstream type %q for %q", cfg.Type, name)

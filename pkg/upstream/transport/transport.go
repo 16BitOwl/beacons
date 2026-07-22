@@ -29,13 +29,15 @@ type ClientOptions struct {
 	// Disabled by default; development use only. An empty Debug.Name falls
 	// back to Name.
 	Debug DebugLogOptions
+	// Metrics is optional; see MetricsRecorder.
+	Metrics MetricsRecorder
 }
 
 // NewClient builds an *http.Client applying the canonical resilience chain,
-// outermost first: CircuitBreaker → Retry → AttemptTimeout → Auth → DebugLog.
-// Every upstream adapter uses this path; adapters supply only their auth
-// middleware. The timeout sits inside Retry (per-attempt, not whole-chain), so
-// the client sets no http.Client.Timeout.
+// outermost first: CircuitBreaker → Retry → Metrics → AttemptTimeout → Auth →
+// DebugLog. Every upstream adapter uses this path; adapters supply only their
+// auth middleware. The timeout sits inside Retry (per-attempt, not
+// whole-chain), so the client sets no http.Client.Timeout.
 func NewClient(opts ClientOptions) *http.Client {
 	timeout := opts.Timeout
 	if timeout <= 0 {
@@ -46,8 +48,10 @@ func NewClient(opts ClientOptions) *http.Client {
 		CircuitBreaker(CircuitBreakerOptions{
 			Name:            opts.Name,
 			MaxAuthFailures: opts.MaxAuthFailures,
+			Recorder:        opts.Metrics,
 		}),
 		Retry(opts.Retry),
+		Metrics(opts.Name, opts.Metrics),
 		AttemptTimeout(timeout),
 	}
 	if opts.Auth != nil {

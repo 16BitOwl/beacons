@@ -35,3 +35,7 @@ Alongside the standard Go and process collectors (`go_*`, `process_*`), Beacons 
 | `beacons_sync_operations_total` | counter | Sync operations by `upstream`, `operation` (`upsert`, `delete`, `list`), and `result` (`success`, `failure`). |
 | `beacons_sync_duration_seconds` | histogram | Upstream call latency by `upstream` and `operation`. |
 | `beacons_drift_corrections_total` | counter | Drift corrections applied by `upstream` and `reason` (`missing`, `changed`). |
+| `beacons_upstream_api_calls_total` | counter | HTTP attempts to upstream APIs by `upstream`, `method`, and `status` (HTTP status code, or `error` for a failed round trip). One per retry attempt. |
+| `beacons_upstream_api_latency_seconds` | histogram | Latency of individual HTTP attempts by `upstream` and `method`. |
+| `beacons_circuit_breaker_open` | gauge | `1` if an upstream's circuit breaker has tripped (too many consecutive auth failures), else `0`, by `upstream`. |
+| `beacons_backoff_gated_total` | counter | Reconcile ops skipped because the record is still within its post-failure backoff window, by `upstream`. |
